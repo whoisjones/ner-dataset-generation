@@ -3,12 +3,13 @@ from tqdm import tqdm
 from pathlib import Path
 from itertools import cycle
 from collections import defaultdict
+import shutil
 
 from .metrics import compute_span_predictions, add_batch_metrics, finalize_metrics
 from .logger import setup_logger
 
 
-def evaluate(model, dataloader, device):
+def evaluate(model, dataloader, accelerator):
     """Evaluate the model on a dataset."""
     model.eval()
     total_loss = 0.0
@@ -17,26 +18,15 @@ def evaluate(model, dataloader, device):
     metrics_by_type = defaultdict(lambda: {"tp": 0, "fp": 0, "fn": 0})
     
     with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Evaluating"):
-            # Move all tensors to device in one dict comprehension
-            batch_on_device = {
-                k: v.to(device) if isinstance(v, torch.Tensor) else v 
-                for k, v in batch.items() 
-                if k != "labels"
-            }
-            batch_on_device["labels"] = {
-                k: v.to(device) if isinstance(v, torch.Tensor) else v 
-                for k, v in batch["labels"].items()
-            }
-            
+        for batch in tqdm(dataloader, desc="Evaluating", disable=not accelerator.is_local_main_process):
             output = model(
-                token_input_ids=batch_on_device["token_input_ids"],
-                token_attention_mask=batch_on_device["token_attention_mask"],
-                token_token_type_ids=batch_on_device.get("token_token_type_ids"),
-                type_input_ids=batch_on_device["type_input_ids"],
-                type_attention_mask=batch_on_device["type_attention_mask"],
-                type_token_type_ids=batch_on_device.get("type_token_type_ids"),
-                labels=batch_on_device["labels"]
+                token_input_ids=batch["token_input_ids"],
+                token_attention_mask=batch["token_attention_mask"],
+                token_token_type_ids=batch.get("token_token_type_ids"),
+                type_input_ids=batch["type_input_ids"],
+                type_attention_mask=batch["type_attention_mask"],
+                type_token_type_ids=batch.get("type_token_type_ids"),
+                labels=batch["labels"]
             )
             
             loss = output.loss
@@ -48,9 +38,9 @@ def evaluate(model, dataloader, device):
                 start_logits=output.start_logits, 
                 end_logits=output.end_logits, 
                 span_logits=output.span_logits,
-                start_valid_mask=batch_on_device["labels"]["start_loss_mask"],
-                end_valid_mask=batch_on_device["labels"]["end_loss_mask"],
-                span_valid_mask=batch_on_device["labels"]["span_loss_mask"],
+                start_valid_mask=batch["labels"]["start_loss_mask"],
+                end_valid_mask=batch["labels"]["end_loss_mask"],
+                span_valid_mask=batch["labels"]["span_loss_mask"],
                 max_span_width=model.config.max_span_length,
             )
             add_batch_metrics(golds, predictions, metrics_by_type)
@@ -63,7 +53,7 @@ def evaluate(model, dataloader, device):
     return metrics
 
 
-def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, device, args):
+def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, accelerator, args):
     logger = setup_logger(args.output_dir)
     model.train()
     total_loss = 0.0
@@ -71,9 +61,12 @@ def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, device
     global_step = 0
     best_f1 = 0.0
     
+    save_total_limit = getattr(args, 'save_total_limit', 2)
+    best_models = []
+    
     train_iterator = cycle(train_dataloader)
     
-    progress_bar = tqdm(total=args.max_steps, desc="Training")
+    progress_bar = tqdm(total=args.max_steps, desc="Training", disable=not accelerator.is_local_main_process)
     
     while global_step < args.max_steps:
         batch = next(train_iterator)
@@ -82,34 +75,23 @@ def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, device
         
         optimizer.zero_grad()
         
-        # Move all tensors to device in one dict comprehension
-        batch_on_device = {
-            k: v.to(device) if isinstance(v, torch.Tensor) else v 
-            for k, v in batch.items() 
-            if k != "labels"
-        }
-        batch_on_device["labels"] = {
-            k: v.to(device) if isinstance(v, torch.Tensor) else v 
-            for k, v in batch["labels"].items()
-        }
-        
         output = model(
-            token_input_ids=batch_on_device["token_input_ids"],
-            token_attention_mask=batch_on_device["token_attention_mask"],
-            token_token_type_ids=batch_on_device.get("token_token_type_ids"),
-            type_input_ids=batch_on_device["type_input_ids"],
-            type_attention_mask=batch_on_device["type_attention_mask"],
-            type_token_type_ids=batch_on_device.get("type_token_type_ids"),
-            labels=batch_on_device["labels"]
+            token_input_ids=batch["token_input_ids"],
+            token_attention_mask=batch["token_attention_mask"],
+            token_token_type_ids=batch.get("token_token_type_ids"),
+            type_input_ids=batch["type_input_ids"],
+            type_attention_mask=batch["type_attention_mask"],
+            type_token_type_ids=batch.get("type_token_type_ids"),
+            labels=batch["labels"]
         )
         loss = output.loss
 
-        # Backward pass
-        loss.backward()
+        # Backward pass with accelerator (handles mixed precision automatically)
+        accelerator.backward(loss)
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         scheduler.step()
-        
+
         total_loss += loss.item()
         num_batches += 1
         global_step += 1
@@ -127,23 +109,35 @@ def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, device
             logger.info(f"Training Loss: {total_loss/num_batches:.4f}")
             
             # Evaluate
-            eval_metrics = evaluate(model, eval_dataloader, device)
+            if eval_dataloader is not None:
+                eval_metrics = evaluate(model, eval_dataloader, accelerator)
+            else:
+                eval_metrics = {"loss": 0.0, "micro": {"precision": 0.0, "recall": 0.0, "f1": 0.0}}
             logger.info(f"Evaluation Loss: {eval_metrics['loss']:.4f}")
             logger.info(f"Precision: {eval_metrics['micro']['precision']:.4f}")
             logger.info(f"Recall: {eval_metrics['micro']['recall']:.4f}")
             logger.info(f"F1 Score: {eval_metrics['micro']['f1']:.4f}")
             
-            # Save checkpoint
-            checkpoint_dir = Path(args.output_dir) / f"checkpoint-{global_step}"
-            model.save_pretrained(str(checkpoint_dir))
-            logger.info(f"Saved checkpoint to {checkpoint_dir}")
+            # Save checkpoint (unwrap model if needed)
+            if accelerator.is_main_process:
+                unwrapped_model = accelerator.unwrap_model(model)
+                checkpoint_dir = Path(args.output_dir) / f"checkpoint-{global_step}"
+                unwrapped_model.save_pretrained(str(checkpoint_dir))
+                logger.info(f"Saved checkpoint to {checkpoint_dir}")
             
-            # Save best model based on F1 score
-            if eval_metrics['micro']['f1'] > best_f1:  # Higher F1 is better
-                best_f1 = eval_metrics['micro']['f1']
-                best_dir = Path(args.output_dir) / "best"
-                model.save_pretrained(str(best_dir))
-                logger.info(f"New best model saved (F1: {eval_metrics['micro']['f1']:.4f})")
+            # Track checkpoints with their F1 scores
+            current_f1 = eval_metrics['micro']['f1']
+            if current_f1 > best_f1:
+                best_f1 = current_f1
+            
+            best_models.append((current_f1, checkpoint_dir, global_step))
+            best_models.sort(key=lambda x: x[0], reverse=True)
+            
+            if len(best_models) > save_total_limit:
+                _, worst_checkpoint_path, _ = best_models[save_total_limit]
+                shutil.rmtree(worst_checkpoint_path)
+            
+            best_models = best_models[:save_total_limit]
             
             logger.info(f"{'='*50}\n")
             

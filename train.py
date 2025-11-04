@@ -15,6 +15,7 @@ import transformers
 from transformers import (AutoTokenizer, get_linear_schedule_with_warmup, HfArgumentParser, TrainingArguments)
 from datasets import load_dataset
 from torch.utils.data import DataLoader
+from accelerate import Accelerator
 
 warnings.filterwarnings("ignore", message=".*beta.*renamed.*bias.*")
 warnings.filterwarnings("ignore", message=".*gamma.*renamed.*weight.*")
@@ -46,7 +47,11 @@ def main():
     
     torch.manual_seed(training_args.seed)
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Initialize accelerator for mixed precision and device management
+    accelerator = Accelerator(
+        mixed_precision="fp16" if getattr(training_args, 'fp16', False) else "no",
+        gradient_accumulation_steps=getattr(training_args, 'gradient_accumulation_steps', 1)
+    )
     
     data_files = {}
     if data_args.train_file is not None:
@@ -66,10 +71,10 @@ def main():
         init_temperature=model_args.init_temperature,
         start_loss_weight=model_args.start_loss_weight,
         end_loss_weight=model_args.end_loss_weight,
-        span_loss_weight=model_args.span_loss_weight
+        span_loss_weight=model_args.span_loss_weight,
+        type_encoder_pooling=model_args.type_encoder_pooling
     )
     model = SpanModel(config=config)
-    model.to(device)
 
     token_encoder_tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
     in_batch_collator = InBatchDataCollator(token_encoder_tokenizer, max_seq_length=data_args.max_seq_length, format=data_args.annotation_format)
@@ -148,29 +153,34 @@ def main():
         num_training_steps=training_args.max_steps
     )
     
+    # Prepare model, optimizer, and dataloaders with accelerator
+    if training_args.do_train:
+        model, optimizer, train_dataloader = accelerator.prepare(model, optimizer, train_dataloader)
+    if training_args.do_eval:
+        eval_dataloader = accelerator.prepare(eval_dataloader)
+    if training_args.do_predict:
+        test_dataloader = accelerator.prepare(test_dataloader)
+    
     if training_args.do_train:
         config.save_pretrained(Path(training_args.output_dir))
         final_step = train(
             model=model,
             train_dataloader=train_dataloader,
-            eval_dataloader=eval_dataloader,
+            eval_dataloader=eval_dataloader if training_args.do_eval else None,
             optimizer=optimizer,
             scheduler=scheduler,
-            device=device,
+            accelerator=accelerator,
             args=training_args
         )
 
     if training_args.do_predict:
-        final_dir = Path(training_args.output_dir) / "final"
-        model.save_pretrained(str(final_dir))
         logger.info(f"\nTraining complete! Completed {final_step} steps.")
-        logger.info(f"Final model saved to {final_dir}")
         
         # Final evaluation on test set
         logger.info("\n" + "=" * 60)
         logger.info("Final Test Set Evaluation")
         logger.info("=" * 60)
-        test_metrics = evaluate(model, test_dataloader, device)
+        test_metrics = evaluate(model, test_dataloader, accelerator)
     
         logger.info(f"Test Loss: {test_metrics['loss']:.4f}")
         logger.info(f"Test Precision: {test_metrics['micro']['precision']:.4f}")

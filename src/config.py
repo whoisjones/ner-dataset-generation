@@ -15,6 +15,7 @@ class SpanModelConfig(PretrainedConfig):
         linear_hidden_size: int = 128,
         dropout: float = 0.1,
         init_temperature: float = 0.07,
+        type_encoder_pooling: str = "cls",
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -24,3 +25,4 @@ class SpanModelConfig(PretrainedConfig):
         self.dropout = dropout
         self.linear_hidden_size = linear_hidden_size
         self.init_temperature = init_temperature
+        self.type_encoder_pooling = type_encoder_pooling

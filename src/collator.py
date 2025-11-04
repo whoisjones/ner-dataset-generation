@@ -10,7 +10,7 @@ class InBatchDataCollator:
     
     def __call__(self, batch):
         if self.format == 'text':
-            texts = [" ".join(sample["tokens"]) for sample in batch]
+            texts = [sample['text'] for sample in batch]
         elif self.format == 'tokens':
             texts = [sample["tokens"] for sample in batch]
         else:
@@ -124,7 +124,7 @@ class InBatchDataCollator:
                         })
 
                 elif self.format == 'tokens':
-                    if label["start"] in word_ids and label["end"] in word_ids:
+                    if label["start"] in word_ids and label["end"] - 1 in word_ids:
                         start_label_index, end_label_index = text_start_index, text_end_index
                         while start_label_index <= text_end_index and word_ids[start_label_index] != label["start"]:
                             start_label_index += 1
@@ -132,9 +132,9 @@ class InBatchDataCollator:
                         while end_label_index <= text_end_index and word_ids[end_label_index] >= label["end"]:
                             end_label_index -= 1
 
-                        start_labels[type2id_batch[label["label"]], label["start"]] = 1
-                        end_labels[type2id_batch[label["label"]], label["end"]] = 1
-                        span_labels[type2id_batch[label["label"]], label["start"], label["end"]] = 1
+                        start_labels[type2id_batch[label["label"]], start_label_index] = 1
+                        end_labels[type2id_batch[label["label"]], end_label_index] = 1
+                        span_labels[type2id_batch[label["label"]], start_label_index, end_label_index] = 1
 
                         annotation.append({
                             "start": start_label_index,
@@ -185,7 +185,7 @@ class AllLabelsDataCollator:
     
     def __call__(self, batch):
         if self.format == 'text':
-            texts = [" ".join(sample["tokens"]) for sample in batch]
+            texts = [sample['text'] for sample in batch]
         elif self.format == 'tokens':
             texts = [sample["tokens"] for sample in batch]
         else:
@@ -280,7 +280,7 @@ class AllLabelsDataCollator:
                         })
 
                 elif self.format == 'tokens':
-                    if label["start"] in word_ids and label["end"] in word_ids:
+                    if label["start"] in word_ids and label["end"] - 1 in word_ids:
                         start_label_index, end_label_index = text_start_index, text_end_index
                         while start_label_index <= text_end_index and word_ids[start_label_index] != label["start"]:
                             start_label_index += 1
@@ -288,9 +288,9 @@ class AllLabelsDataCollator:
                         while end_label_index <= text_end_index and word_ids[end_label_index] >= label["end"]:
                             end_label_index -= 1
 
-                        start_labels[self.label2id[label["label"]], label["start"]] = 1
-                        end_labels[self.label2id[label["label"]], label["end"]] = 1
-                        span_labels[self.label2id[label["label"]], label["start"], label["end"]] = 1
+                        start_labels[self.label2id[label["label"]], start_label_index] = 1
+                        end_labels[self.label2id[label["label"]], end_label_index] = 1
+                        span_labels[self.label2id[label["label"]], start_label_index, end_label_index] = 1
 
                         annotation.append({
                             "start": start_label_index,

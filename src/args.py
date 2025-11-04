@@ -20,7 +20,7 @@ class ModelArguments:
         default=128, metadata={"help": "Size of the last linear layer."}
     )
     init_temperature: float = field(
-        default=0.07, metadata={"help": "Initial temperature for the logits."}
+        default=0.03, metadata={"help": "Initial temperature for the logits."}
     )
     start_loss_weight: float = field(
         default=0.2, metadata={"help": "Weight for the start loss."}
@@ -30,6 +30,9 @@ class ModelArguments:
     )
     span_loss_weight: float = field(
         default=0.6, metadata={"help": "Weight for the span loss."}
+    )
+    type_encoder_pooling: str = field(
+        default="cls", metadata={"help": "Pooling method for type encoder. Options: 'cls' (uses CLS token) or 'mean' (mean pooling)."}
     )
 
 

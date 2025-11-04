@@ -75,13 +75,22 @@ class SpanModel(PreTrainedModel):
         type_token_type_ids: torch.Tensor = None,
         labels: dict = None
     ):
-        token_embeds = self.token_encoder(token_input_ids, token_attention_mask)
-        type_embeds = self.type_encoder(type_input_ids, type_attention_mask)
+        token_embeds = self.token_encoder(input_ids=token_input_ids, attention_mask=token_attention_mask, token_type_ids=token_token_type_ids)
+        type_embeds = self.type_encoder(input_ids=type_input_ids, attention_mask=type_attention_mask, token_type_ids=type_token_type_ids)
         token_output = token_embeds.last_hidden_state
-        type_output = type_embeds.last_hidden_state[:, 0]
+        
+        if self.config.type_encoder_pooling == "mean":
+            if type_attention_mask is not None:
+                attention_mask_expanded = type_attention_mask.unsqueeze(-1).expand(type_embeds.last_hidden_state.size()).float()
+                sum_embeddings = torch.sum(type_embeds.last_hidden_state * attention_mask_expanded, dim=1)
+                sum_mask = torch.clamp(attention_mask_expanded.sum(dim=1), min=1e-9)
+                type_output = sum_embeddings / sum_mask
+            else:
+                type_output = type_embeds.last_hidden_state.mean(dim=1)
+        else:
+            type_output = type_embeds.last_hidden_state[:, 0, :]
 
         batch_size, seq_length, _ = token_output.size()
-        num_types, _ = type_output.size()
 
         # batch_size x seq_length x hidden_size
         token_start_output = F.normalize(self.dropout(self.token_start_linear(token_output)), dim=-1)
@@ -94,11 +103,11 @@ class SpanModel(PreTrainedModel):
             ],
             dim=3
         )
-
         range_vector = torch.arange(seq_length, device=token_output.device)
         span_width = range_vector.unsqueeze(0) - range_vector.unsqueeze(1) + 1
         span_width = span_width * (span_width > 0)
         span_width = span_width.clamp(0, self.max_span_length)
+
         # seq_length x seq_length x hidden_size
         span_width_embeddings = self.width_embedding(span_width)
         concat_span_outputs = torch.cat([
@@ -119,7 +128,6 @@ class SpanModel(PreTrainedModel):
         end_scores = self.end_logit_scale.exp() * (type_end_output.unsqueeze(0) @ token_end_output.transpose(1, 2))
         # token_span_output: [batch_size, seq_length, seq_length, hidden_size]
         # type_span_output.T: [hidden_size, num_types]
-        # Result: [batch_size, seq_length, seq_length, num_types]
         span_scores = self.span_logit_scale.exp() * (token_span_output @ type_span_output.T)
         # Permute to [batch_size, num_types, seq_length, seq_length]
         span_scores = span_scores.permute(0, 3, 1, 2)
