@@ -2,8 +2,9 @@ import torch
 
 
 class InBatchDataCollator:
-    def __init__(self, tokenizer, max_seq_length=512, max_span_length=30, format='text'):
-        self.tokenizer = tokenizer
+    def __init__(self, token_encoder_tokenizer, type_encoder_tokenizer, max_seq_length=512, max_span_length=30, format='text'):
+        self.token_encoder_tokenizer = token_encoder_tokenizer
+        self.type_encoder_tokenizer = type_encoder_tokenizer
         self.max_seq_length = max_seq_length
         self.max_span_length = max_span_length
         self.format = format
@@ -16,7 +17,7 @@ class InBatchDataCollator:
         else:
             raise ValueError(f"Invalid format: {self.format}")
         
-        token_encodings = self.tokenizer(
+        token_encodings = self.token_encoder_tokenizer(
             texts,
             padding=True,
             truncation=True,
@@ -37,7 +38,7 @@ class InBatchDataCollator:
         if not unique_types:
             return {}
         
-        type_encodings = self.tokenizer(
+        type_encodings = self.type_encoder_tokenizer(
             unique_types,
             padding=True,
             truncation=True,
@@ -136,13 +137,6 @@ class InBatchDataCollator:
                         end_labels[type2id_batch[label["label"]], end_label_index] = 1
                         span_labels[type2id_batch[label["label"]], start_label_index, end_label_index] = 1
 
-                        annotation.append({
-                            "start": start_label_index,
-                            "end": end_label_index,
-                            "label": type2id_batch[label["label"]]
-                        })
-
-            annotations["ner"].append(annotation)
             annotations["start_labels"].append(start_labels)
             annotations["end_labels"].append(end_labels)
             annotations["span_labels"].append(span_labels)
@@ -276,7 +270,7 @@ class AllLabelsDataCollator:
                         annotation.append({
                             "start": start_label_index,
                             "end": end_label_index,
-                            "label": self.label2id[label["label"]]
+                            "label": label["label"]
                         })
 
                 elif self.format == 'tokens':
@@ -321,7 +315,7 @@ class AllLabelsDataCollator:
             "labels": annotations,
             "id2label": {idx: label for label, idx in self.label2id.items()}
         }
-        
+
         if "token_type_ids" in token_encodings:
             batch["token_token_type_ids"] = token_encodings["token_type_ids"]
         if self.type_token_type_ids is not None:

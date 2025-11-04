@@ -35,13 +35,12 @@ def evaluate(model, dataloader, accelerator):
 
             golds = batch['labels']['ner'] 
             predictions = compute_span_predictions(
-                start_logits=output.start_logits, 
-                end_logits=output.end_logits, 
                 span_logits=output.span_logits,
-                start_valid_mask=batch["labels"]["start_loss_mask"],
-                end_valid_mask=batch["labels"]["end_loss_mask"],
-                span_valid_mask=batch["labels"]["span_loss_mask"],
+                start_mask=batch["labels"]["start_loss_mask"],
+                end_mask=batch["labels"]["end_loss_mask"],
                 max_span_width=model.config.max_span_length,
+                id2label=batch["id2label"],
+                threshold=model.config.prediction_threshold
             )
             add_batch_metrics(golds, predictions, metrics_by_type)
     
