@@ -35,15 +35,27 @@ class ModelArguments:
         default="cls", metadata={"help": "Pooling method for type encoder. Options: 'cls' (uses CLS token) or 'mean' (mean pooling)."}
     )
     prediction_threshold: float = field(
-        default=0.4,
+        default=0.5,
         metadata={
             "help": "Threshold for span predictions (lower = higher recall, higher = higher precision). Default 0.4."
         },
     )
-    use_pos_weight: bool = field(
-        default=True,
+    loss_fn: str = field(
+        default="bce",
         metadata={
-            "help": "Whether to use positive class weight in loss. Default True."
+            "help": "The loss function to use. Can be 'bce' or 'focal'."
+        },
+    )
+    focal_alpha: float = field(
+        default=0.75,
+        metadata={
+            "help": "Alpha for the focal loss."
+        },
+    )
+    focal_gamma: float = field(
+        default=2.0,
+        metadata={
+            "help": "Gamma for the focal loss."
         },
     )
 

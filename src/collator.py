@@ -184,9 +184,6 @@ class InBatchDataCollator:
         annotations["end_loss_mask"] = torch.stack(annotations["end_loss_mask"], dim=0)
         annotations["span_labels"] = torch.stack(annotations["span_labels"], dim=0)
         annotations["span_loss_mask"] = torch.stack(annotations["span_loss_mask"], dim=0)
-        annotations["start_loss_weight"] = (annotations["start_loss_mask"].sum() / annotations["start_labels"].sum())
-        annotations["end_loss_weight"] = (annotations["end_loss_mask"].sum() / annotations["end_labels"].sum())
-        annotations["span_loss_weight"] = (annotations["span_loss_mask"].sum() / annotations["span_labels"].sum())
 
         batch = {
             "token_input_ids": token_encodings["input_ids"],

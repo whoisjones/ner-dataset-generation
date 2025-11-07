@@ -9,6 +9,7 @@ from typing import Optional, Tuple
 from transformers.file_utils import ModelOutput
 
 from .config import SpanModelConfig
+from .loss import BCELoss, FocalLoss, JGMakerLoss
 
 @dataclass 
 class SpanModelOutput(ModelOutput):
@@ -51,6 +52,12 @@ class SpanModel(PreTrainedModel):
 
         self.token_encoder = AutoModel.from_pretrained(config.token_encoder, config=token_config)
         self.type_encoder = AutoModel.from_pretrained(config.type_encoder, config=type_config)
+        if config.loss_fn == "focal":
+            self.loss_fn = FocalLoss(alpha=config.focal_alpha, gamma=config.focal_gamma)
+        elif config.loss_fn == "jgmaker":
+            self.loss_fn = JGMakerLoss()
+        else:
+            self.loss_fn = BCELoss()
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -133,27 +140,21 @@ class SpanModel(PreTrainedModel):
         span_scores = span_scores.permute(0, 3, 1, 2)
 
         if labels is not None:
-            start_loss = F.binary_cross_entropy_with_logits(
+            start_loss = self.loss_fn(
                 start_scores, 
                 labels["start_labels"], 
-                pos_weight=labels["start_loss_weight"] if self.config.use_pos_weight and self.training else None, 
-                reduction="none"
             )
             start_loss = (start_loss * labels["start_loss_mask"]).sum() / labels["start_loss_mask"].sum()
 
-            end_loss = F.binary_cross_entropy_with_logits(
+            end_loss = self.loss_fn(
                 end_scores,
                 labels["end_labels"], 
-                pos_weight=labels["end_loss_weight"] if self.config.use_pos_weight and self.training else None, 
-                reduction="none"
             )
             end_loss = (end_loss * labels["end_loss_mask"]).sum() / labels["end_loss_mask"].sum()
 
-            span_loss = F.binary_cross_entropy_with_logits(
+            span_loss = self.loss_fn(
                 span_scores, 
                 labels["span_labels"], 
-                pos_weight=labels["span_loss_weight"] if self.config.use_pos_weight and self.training else None, 
-                reduction="none"
             )
             span_loss = (span_loss * labels["span_loss_mask"]).sum() / labels["span_loss_mask"].sum()
             loss = self.config.start_loss_weight * start_loss + self.config.end_loss_weight * end_loss + self.config.span_loss_weight * span_loss
