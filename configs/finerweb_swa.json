@@ -1,5 +1,5 @@
 {
-  "run_name": "masakhaner-swa-run",
+  "run_name": "masakhaner-swa-finerweb-run",
   "token_encoder": "xlm-roberta-base",
   "type_encoder": "xlm-roberta-base",
   "dataset_name": "masakhaner",
@@ -8,7 +8,7 @@
   "train_file": "/vol/tmp/goldejon/ner/data/masakhaner/swa/train.jsonl",
   "validation_file": "/vol/tmp/goldejon/ner/data/masakhaner/swa/validation.jsonl",
   "test_file": "/vol/tmp/goldejon/ner/data/masakhaner/swa/test.jsonl",
-  "output_dir": "/vol/tmp/goldejon/ner/masakhaner-swa-pos-weight",
+  "output_dir": "/vol/tmp/goldejon/ner/masakhaner-swa-finerweb",
   "per_device_train_batch_size": 8,
   "per_device_eval_batch_size": 8,
   "loss_fn": "bce",

@@ -1,20 +1,20 @@
 {
-    "run_name": "conll2003-base-run",
+    "run_name": "conll2003-finerweb-run",
     "token_encoder": "bert-base-uncased",
     "type_encoder": "bert-base-uncased",
     "dataset_name": "conll2003",
     "annotation_format": "text",
     "loss_masking": "subwords",
-    "train_file": "/vol/tmp/goldejon/ner/data/conll2003/train.jsonl",
+    "train_file": "/vol/tmp/goldejon/ner/data/finerweb_singlelabel/eng.jsonl",
     "validation_file": "/vol/tmp/goldejon/ner/data/conll2003/validation.jsonl",
     "test_file": "/vol/tmp/goldejon/ner/data/conll2003/test.jsonl",
-    "output_dir": "/vol/tmp/goldejon/ner/conll2003",
-    "per_device_train_batch_size": 8,
+    "output_dir": "/vol/tmp/goldejon/ner/conll2003-finerweb",
+    "per_device_train_batch_size": 1,
     "per_device_eval_batch_size": 8,
-    "loss_fn": "bce",
-    "focal_alpha": 0.75,
+    "loss_fn": "jgmaker",
+    "focal_alpha": 0.95,
     "focal_gamma": 2.0,
-    "learning_rate": 5e-05,
+    "learning_rate": 3e-05,
     "max_steps": 3000,
     "eval_steps": 500,
     "max_seq_length": 512,
@@ -33,4 +33,5 @@
     "do_eval": true,
     "do_predict": true,
     "prediction_threshold": 0.5
-}
+  }
+  
