@@ -1,19 +1,6 @@
 import torch
 import torch.nn.functional as F
 
-def remove_overlaps(predictions):
-    final_preds = []
-    for batch in predictions:
-        selected = []
-        used = set()
-        for s, e, t, c in sorted(batch, key=lambda x: (-x[3], x[0], x[1])):
-            if all(pos not in used for pos in range(s, e + 1)):
-                selected.append((s, e, t, c))
-                for pos in range(s, e + 1):
-                    used.add(pos)
-        final_preds.append(selected)
-    return final_preds
-
 def compute_span_predictions(span_logits, start_mask, end_mask, max_span_width, id2label, threshold=0.5):
     B, T, S, _ = span_logits.shape
     device = span_logits.device
@@ -43,10 +30,10 @@ def compute_span_predictions(span_logits, start_mask, end_mask, max_span_width, 
 
     for b, t, s, e, c in zip(batch_ids.tolist(), type_ids.tolist(), 
                              start_indexes.tolist(), end_indexes.tolist(), confidences.tolist()):
-        if used_by_batch[b][s:e].any():
+        if used_by_batch[b][s:e + 1].any():
             continue
         predictions[b].append({"start": s, "end": e, "label": id2label[t], "confidence": c})
-        used_by_batch[b][s:e] = True
+        used_by_batch[b][s:e + 1] = True
     
     return predictions
 
