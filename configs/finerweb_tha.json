@@ -5,11 +5,11 @@
     "dataset_name": "thainer",
     "annotation_format": "tokens",
     "loss_masking": "subwords",
-    "train_file": "/vol/tmp/goldejon/ner/data/thainer/train.jsonl",
+    "train_file": "/vol/tmp/goldejon/ner/data/finerweb_singlelabel/tha.jsonl",
     "validation_file": "/vol/tmp/goldejon/ner/data/thainer/validation.jsonl",
     "test_file": "/vol/tmp/goldejon/ner/data/thainer/test.jsonl",
     "output_dir": "/vol/tmp/goldejon/ner/thainer-finerweb",
-    "per_device_train_batch_size": 6,
+    "per_device_train_batch_size": 1,
     "per_device_eval_batch_size": 6,
     "loss_fn": "bce",
     "focal_alpha": 0.75,
@@ -33,7 +33,7 @@
     "do_train": true,
     "do_eval": true,
     "do_predict": true,
-    "prediction_threshold": 0.5
+    "prediction_threshold": 0.4
 }
   
   

@@ -8,7 +8,7 @@
     "train_file": "/vol/tmp/goldejon/ner/data/conll2003/train.jsonl",
     "validation_file": "/vol/tmp/goldejon/ner/data/conll2003/validation.jsonl",
     "test_file": "/vol/tmp/goldejon/ner/data/conll2003/test.jsonl",
-    "output_dir": "/vol/tmp/goldejon/ner/conll2003",
+    "output_dir": "/vol/tmp/goldejon/ner/conll2003-bce",
     "per_device_train_batch_size": 8,
     "per_device_eval_batch_size": 8,
     "loss_fn": "bce",
