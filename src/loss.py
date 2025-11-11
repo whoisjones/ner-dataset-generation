@@ -33,39 +33,34 @@ class FocalLoss(nn.Module):
         return loss
 
 class JGMakerLoss(nn.Module):
-    def __init__(self, total_steps: int, k: float = 0.01):
+    def __init__(self, total_steps: int, k: float = 0.01, threshold: float = 0.5):
         super().__init__()
         self.total_steps = int(total_steps)
         self.k = max(1.0, float(k) * float(total_steps))
+        self.threshold = threshold
+        self.step = 0
 
-    def _weights(self, step: int, device):
-        self._denom = torch.log1p(torch.tensor(self.total_steps / self.k, device=device))
-        alpha = torch.log1p(torch.tensor(step, device=device) / self.k) / self._denom
-        beta = 1.0 - alpha
-        return alpha, beta
-
-    @torch.no_grad()
-    def _confusion_masks(self, probs: torch.Tensor, labels: torch.Tensor, thresh: float = 0.5):
-        preds = probs > thresh
-        pos = labels.bool()
-        neg = ~pos
-        tp = pos & preds
-        fn = pos & (~preds)
-        fp = neg & preds
-        tn = neg & (~preds)
-        return tp, fp, fn, tn
-
-    def forward(self, logits: torch.Tensor, labels: torch.Tensor, step: int):
+    def forward(self, logits: torch.Tensor, labels: torch.Tensor):
+        if self.training:
+            self.step += 1/3
         ce = F.binary_cross_entropy_with_logits(logits, labels, reduction="none")
 
         with torch.no_grad():
             probs = torch.sigmoid(logits)
-            tp, fp, fn, tn = self._confusion_masks(probs, labels)
+            preds = probs > self.threshold
+            pos = labels.bool()
+            neg = ~pos
+            tp = pos & preds
+            fn = pos & (~preds)
+            fp = neg & preds
+            tn = neg & (~preds)
 
-        w_inc, w_dec = self._weights(step, device=logits.device)
+        denom = torch.log1p(torch.tensor(self.total_steps / self.k, device=logits.device))
+        alpha = torch.log1p(torch.tensor(self.step, device=logits.device) / self.k) / denom
+        beta = 1.0 - alpha
 
-        inc_mask = tp | fp | fn
-        weights = inc_mask.to(logits.dtype) * w_inc + tn.to(logits.dtype) * w_dec
+        types_mask = tp | fp | fn
+        weights = types_mask.to(logits.dtype) * alpha + tn.to(logits.dtype) * beta
 
-        loss = (ce * weights).mean()
+        loss = (ce * weights)
         return loss
