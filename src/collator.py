@@ -1,6 +1,6 @@
 import torch
 
-def all_spans_mask(input_ids, sequence_ids):
+def all_spans_mask(input_ids, sequence_ids, max_span_length):
     text_start_index = 0
     while sequence_ids[text_start_index] == None:
         text_start_index += 1
@@ -16,14 +16,14 @@ def all_spans_mask(input_ids, sequence_ids):
 
     span_mask = [
         [
-            (j - i >= 0) * s * e for j, e in enumerate(end_mask)
+            (j - i >= 0 and j - i < max_span_length) * s * e for j, e in enumerate(end_mask)
         ]
         for i, s in enumerate(start_mask)
     ]
 
     return text_start_index, text_end_index, start_mask, end_mask, span_mask
 
-def subwords_mask(input_ids, word_ids):
+def subwords_mask(input_ids, word_ids, max_span_length):
     text_start_index = 0
     while word_ids[text_start_index] == None:
         text_start_index += 1
@@ -45,7 +45,7 @@ def subwords_mask(input_ids, word_ids):
 
     span_mask = [
         [
-            (j - i >= 0) * s * e for j, e in enumerate(end_mask)
+            (j - i >= 0 and j - i < max_span_length) * s * e for j, e in enumerate(end_mask)
         ]
         for i, s in enumerate(start_mask)
     ]
@@ -119,10 +119,10 @@ class InBatchDataCollator:
 
             if self.loss_masking == 'subwords':
                 word_ids = token_encodings.word_ids(i)
-                text_start_index, text_end_index, start_mask, end_mask, span_mask = subwords_mask(input_ids, word_ids)
+                text_start_index, text_end_index, start_mask, end_mask, span_mask = subwords_mask(input_ids, word_ids, self.max_span_length)
             else:
                 sequence_ids = token_encodings.sequence_ids(i)
-                text_start_index, text_end_index, start_mask, end_mask, span_mask = all_spans_mask(input_ids, sequence_ids)
+                text_start_index, text_end_index, start_mask, end_mask, span_mask = all_spans_mask(input_ids, sequence_ids, self.max_span_length)
 
             start_loss_mask = torch.tensor([start_mask[:] for _ in unique_types])
             end_loss_mask = torch.tensor([end_mask[:] for _ in unique_types])
@@ -251,10 +251,10 @@ class AllLabelsDataCollator:
 
             if self.loss_masking == 'subwords':
                 word_ids = token_encodings.word_ids(i)
-                text_start_index, text_end_index, start_mask, end_mask, span_mask = subwords_mask(input_ids, word_ids)
+                text_start_index, text_end_index, start_mask, end_mask, span_mask = subwords_mask(input_ids, word_ids, self.max_span_length)
             else:
                 sequence_ids = token_encodings.sequence_ids(i)
-                text_start_index, text_end_index, start_mask, end_mask, span_mask = all_spans_mask(input_ids, sequence_ids)
+                text_start_index, text_end_index, start_mask, end_mask, span_mask = all_spans_mask(input_ids, sequence_ids, self.max_span_length)
 
             start_loss_mask = torch.tensor([start_mask[:] for _ in range(len(self.label2id))])
             end_loss_mask = torch.tensor([end_mask[:] for _ in range(len(self.label2id))])
