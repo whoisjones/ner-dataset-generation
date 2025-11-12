@@ -43,15 +43,21 @@ def transform_bio_to_span(dataset: Dataset) -> list[dict]:
         span_dataset.append({"tokenized_text": sample["words"], "ner": spans})
     return span_dataset
 
+def transform_jsonl_to_gliner_dataset(dataset: Dataset) -> list[dict]:
+    gliner_format = []
+    for sample in dataset:
+        gliner_format.append({"tokenized_text": sample["tokens"], "ner": [(annotation["start"], annotation["end"] - 1, annotation["label"]) for annotation in sample["token_spans"]]})
+    return gliner_format
+
 def main():
-    dataset = load_dataset("pythainlp/thainer-corpus-v2.2")
-    labels = set([label.split('-')[-1] for label in dataset['test'].features["ner"].feature.names if label != 'O'])
-    test_dataset_with_span_labels = transform_bio_to_span(dataset['test'])
-    model = GLiNER.from_pretrained("/vol/tmp/goldejon/multilingual_ner/gliner_x_logs/checkpoint-30000")
+    dataset = load_dataset("json", data_files="/vol/tmp/goldejon/ner/data/masakhaner/swa/test.jsonl")
+    test_dataset_with_span_labels = transform_jsonl_to_gliner_dataset(dataset['train'])
+    labels = list(set([label for sample in test_dataset_with_span_labels for _, _, label in sample["ner"]]))
+    model = GLiNER.from_pretrained("urchade/gliner_multi-v2.1")
     model.to("cuda")
 
     results, f1 = model.evaluate(test_dataset_with_span_labels, flat_ner=True, batch_size=12, entity_types=list(labels))
-    print()
+    print(results)
 
 if __name__ == "__main__":
     main()
