@@ -22,7 +22,8 @@ def mlp(input_size, output_size, dropout):
     return nn.Sequential(
         nn.Linear(input_size, output_size),
         nn.Dropout(dropout),
-        nn.LayerNorm(output_size)
+        nn.ReLU(),
+        nn.Linear(output_size, output_size),
     )
 
 class SpanModel(PreTrainedModel):
@@ -55,7 +56,7 @@ class SpanModel(PreTrainedModel):
         if config.loss_fn == "focal":
             self.loss_fn = FocalLoss(alpha=config.focal_alpha, gamma=config.focal_gamma)
         elif config.loss_fn == "jgmaker":
-            self.loss_fn = JGMakerLoss()
+            self.loss_fn = JGMakerLoss(total_steps=3000)
         else:
             self.loss_fn = BCELoss()
 
