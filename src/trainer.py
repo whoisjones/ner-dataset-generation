@@ -5,7 +5,7 @@ from itertools import cycle
 from collections import defaultdict
 import shutil
 
-from .metrics import compute_span_predictions, add_batch_metrics, finalize_metrics
+from .metrics import compute_span_predictions, compute_compressed_span_predictions, add_batch_metrics, finalize_metrics
 from .logger import setup_logger
 
 
@@ -33,15 +33,24 @@ def evaluate(model, dataloader, accelerator):
             total_loss += loss.item()
             num_batches += 1
 
-            golds = batch['labels']['ner'] 
-            predictions = compute_span_predictions(
-                span_logits=output.span_logits,
-                start_mask=batch["labels"]["start_loss_mask"],
-                end_mask=batch["labels"]["end_loss_mask"],
-                max_span_width=model.config.max_span_length,
-                id2label=batch["id2label"],
-                threshold=model.config.prediction_threshold
-            )
+            golds = batch['labels']['ner']
+            if len(output.span_logits.shape) == 4:
+                predictions = compute_span_predictions(
+                    span_logits=output.span_logits,
+                    start_mask=batch["labels"]["start_loss_mask"],
+                    end_mask=batch["labels"]["end_loss_mask"],
+                    max_span_width=model.config.max_span_length,
+                    id2label=batch["id2label"],
+                    threshold=model.config.prediction_threshold
+                )
+            else:
+                predictions = compute_compressed_span_predictions(
+                    span_logits=output.span_logits,
+                    span_mask=batch["labels"]["span_loss_mask"],
+                    span_mapping=batch["labels"]["spans_idx"],
+                    id2label=batch["id2label"],
+                    threshold=0.1
+                )
             add_batch_metrics(golds, predictions, metrics_by_type)
     
     avg_loss = total_loss / num_batches if num_batches > 0 else 0.0

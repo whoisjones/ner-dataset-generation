@@ -37,6 +37,34 @@ def compute_span_predictions(span_logits, start_mask, end_mask, max_span_width, 
     
     return predictions
 
+def compute_compressed_span_predictions(span_logits, span_mask, span_mapping, id2label, threshold=0.5):
+    B, C, S = span_logits.shape
+    device = span_logits.device
+
+    span_probs = torch.sigmoid(span_logits)
+    span_preds = span_probs > threshold
+    batch_ids, type_ids, span_ids = (span_mask & span_preds).nonzero(as_tuple=True)
+    confidences = span_probs[batch_ids, type_ids, span_ids]
+
+    order = torch.argsort(confidences, descending=True)
+    batch_ids = batch_ids[order]
+    type_ids = type_ids[order]
+    span_ids = span_ids[order]
+    confidences = confidences[order]
+
+    predictions = [[] for _ in range(B)]
+    used_by_batch = [torch.zeros(S, dtype=torch.bool, device=device) for _ in range(B)]
+
+    for b, t, s, c in zip(batch_ids.tolist(), type_ids.tolist(), 
+                             span_ids.tolist(), confidences.tolist()):
+        start, end = span_mapping[b, s].cpu().numpy().tolist()
+        if used_by_batch[b][start:end + 1].any():
+            continue
+        predictions[b].append({"start": start, "end": end, "label": id2label[t], "confidence": c})
+        used_by_batch[b][start:end + 1] = True
+
+    return predictions
+
 def _norm_pred_item(p):
     if isinstance(p, dict):
         return int(p["start"]), int(p["end"]), str(p["label"])
