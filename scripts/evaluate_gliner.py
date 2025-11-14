@@ -49,7 +49,7 @@ def transform_jsonl_to_gliner_dataset(dataset: Dataset) -> list[dict]:
         gliner_format.append({"tokenized_text": sample["tokens"], "ner": [(annotation["start"], annotation["end"] - 1, annotation["label"]) for annotation in sample["token_spans"]]})
     return gliner_format
 
-def main():
+def classic_evaluation():
     dataset = load_dataset("json", data_files="/vol/tmp/goldejon/ner/data/masakhaner/swa/test.jsonl")
     test_dataset_with_span_labels = transform_jsonl_to_gliner_dataset(dataset['train'])
     labels = list(set([label for sample in test_dataset_with_span_labels for _, _, label in sample["ner"]]))
@@ -59,5 +59,24 @@ def main():
     results, f1 = model.evaluate(test_dataset_with_span_labels, flat_ner=True, batch_size=12, entity_types=list(labels))
     print(results)
 
+def string_evaluation():
+    dataset = load_dataset("json", data_files="/vol/tmp/goldejon/ner/data/thainer_no_tokens/test.jsonl")
+    labels = list(set([span["label"] for sample in dataset['train'] for span in sample['char_spans']]))
+    model = GLiNER.from_pretrained("urchade/gliner_multi-v2.1")
+    model.to("cuda")
+
+    tp, fp, fn = 0, 0, 0
+    for sample in dataset['train']:
+        preds = model.predict_entities(sample['text'], flat_ner=True, labels=list(labels))
+        golds = sample['char_spans']
+        preds = [(pred['start'], pred['end'], pred['label']) for pred in preds]
+        golds = [(gold['start'], gold['end'], gold['label']) for gold in golds]
+        tp += len(set(preds) & set(golds))
+        fp += len(set(preds) - set(golds))
+        fn += len(set(golds) - set(preds))
+    
+    f1 = 2 * tp / (2 * tp + fp + fn)
+    print(f1)
+
 if __name__ == "__main__":
-    main()
+    string_evaluation()
