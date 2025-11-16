@@ -12,10 +12,10 @@ from pathlib import Path
 
 import torch
 import transformers
-from transformers import (AutoTokenizer, get_linear_schedule_with_warmup, HfArgumentParser, TrainingArguments)
+from transformers import (AutoTokenizer, get_linear_schedule_with_warmup, HfArgumentParser)
 from datasets import load_dataset
 from torch.utils.data import DataLoader
-from accelerate import Accelerator
+from accelerate import Accelerator, DistributedDataParallelKwargs
 
 warnings.filterwarnings("ignore", message=".*beta.*renamed.*bias.*")
 warnings.filterwarnings("ignore", message=".*gamma.*renamed.*weight.*")
@@ -29,13 +29,13 @@ from src.config import SpanModelConfig
 from src.collator import InBatchContrastiveDataCollator, AllLabelsContrastiveDataCollator
 from src.trainer import train, evaluate
 from src.logger import setup_logger
-from src.args import ModelArguments, DataTrainingArguments
+from src.args import ModelArguments, DataTrainingArguments, CustomTrainingArguments
 
 transformers.logging.set_verbosity_error()
 
 
 def main():
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, CustomTrainingArguments))
     model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[-1]))
     os.makedirs(training_args.output_dir, exist_ok=True)
     
@@ -47,10 +47,12 @@ def main():
     
     torch.manual_seed(training_args.seed)
     
-    # Initialize accelerator for mixed precision and device management
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True, static_graph=False)
+    
     accelerator = Accelerator(
         mixed_precision="fp16" if getattr(training_args, 'fp16', False) else "no",
-        gradient_accumulation_steps=getattr(training_args, 'gradient_accumulation_steps', 1)
+        gradient_accumulation_steps=getattr(training_args, 'gradient_accumulation_steps', 1),
+        kwargs_handlers=[ddp_kwargs]
     )
     
     data_files = {}
@@ -177,9 +179,13 @@ def main():
     if training_args.do_predict:
         test_dataloader = accelerator.prepare(test_dataloader)
     
+    best_checkpoint_path = None
+    best_f1 = 0.0
+    final_step = 0
+    
     if training_args.do_train:
         config.save_pretrained(Path(training_args.output_dir))
-        final_step = train(
+        final_step, best_checkpoint_path, best_f1 = train(
             model=model,
             train_dataloader=train_dataloader,
             eval_dataloader=eval_dataloader if training_args.do_eval else None,
@@ -190,29 +196,50 @@ def main():
         )
 
     if training_args.do_predict:
-        logger.info(f"\nTraining complete! Completed {final_step} steps.")
+        if accelerator.is_main_process:
+            logger.info(f"\nTraining complete! Completed {final_step} steps.")
+        
+        # Load best model for evaluation
+        if best_checkpoint_path is not None and training_args.do_eval:
+            if accelerator.is_main_process:
+                logger.info(f"\nLoading best model from checkpoint: {best_checkpoint_path}")
+                logger.info(f"Best validation F1: {best_f1:.4f}")
+            # Load the best model
+            best_model = ContrastiveSpanModel.from_pretrained(str(best_checkpoint_path))
+            best_model.eval()
+            best_model = accelerator.prepare(best_model)
+            model = best_model
+        else:
+            if accelerator.is_main_process:
+                logger.info("Using latest model for evaluation (no validation was performed during training).")
+            model.eval()
         
         # Final evaluation on test set
-        logger.info("\n" + "=" * 60)
-        logger.info("Final Test Set Evaluation")
-        logger.info("=" * 60)
+        if accelerator.is_main_process:
+            logger.info("\n" + "=" * 60)
+            logger.info("Final Test Set Evaluation")
+            logger.info("=" * 60)
         test_metrics = evaluate(model, test_dataloader, accelerator)
     
-        logger.info(f"Test Loss: {test_metrics['loss']:.4f}")
-        logger.info(f"Test Precision: {test_metrics['micro']['precision']:.4f}")
-        logger.info(f"Test Recall: {test_metrics['micro']['recall']:.4f}")
-        logger.info(f"Test F1 Score: {test_metrics['micro']['f1']:.4f}")
-        logger.info("=" * 60)
+        if accelerator.is_main_process:
+            logger.info(f"Test Loss: {test_metrics['loss']:.4f}")
+            logger.info(f"Test Precision: {test_metrics['micro']['precision']:.4f}")
+            logger.info(f"Test Recall: {test_metrics['micro']['recall']:.4f}")
+            logger.info(f"Test F1 Score: {test_metrics['micro']['f1']:.4f}")
+            logger.info("=" * 60)
         
-        # Save test results to file
-        test_results_path = Path(training_args.output_dir) / "test_results.json"
-        with open(test_results_path, 'w') as f:
-            json.dump({
-                "test_metrics": test_metrics,
-                "config": config.to_dict(),
-                "final_step": final_step
-            }, f, indent=2)
-        logger.info(f"\nTest results saved to {test_results_path}")
+        # Save test results to file (only on main process)
+        if accelerator.is_main_process:
+            test_results_path = Path(training_args.output_dir) / "test_results.json"
+            with open(test_results_path, 'w') as f:
+                json.dump({
+                    "test_metrics": test_metrics,
+                    "config": config.to_dict(),
+                    "final_step": final_step,
+                    "best_checkpoint_path": str(best_checkpoint_path) if best_checkpoint_path is not None else None,
+                    "best_validation_f1": best_f1
+                }, f, indent=2)
+            logger.info(f"\nTest results saved to {test_results_path}")
 
 
 if __name__ == "__main__":

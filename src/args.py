@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional, List
+from transformers import TrainingArguments
 
 @dataclass
 class ModelArguments:
@@ -152,3 +153,14 @@ class DataTrainingArguments:
                 elif isinstance(self.test_file, str):
                     extension = self.test_file.split(".")[-1]
                     assert extension == "jsonl", "`test_file` should be a jsonl file."
+
+
+@dataclass
+class CustomTrainingArguments(TrainingArguments):
+    """
+    Extended TrainingArguments with custom fields for this project.
+    """
+    early_stopping_patience: int = field(
+        default=5,
+        metadata={"help": "Number of evaluation steps to wait before early stopping if no improvement."}
+    )
