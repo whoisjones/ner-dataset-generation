@@ -241,6 +241,9 @@ class InBatchDataCollator:
                         if end_label_index - start_label_index + 1 >= self.max_span_length:
                             continue
 
+                        if start_label_index > end_label_index:
+                            continue
+
                         start_labels[type2id_batch[label["label"]], start_label_index] = 1
                         end_labels[type2id_batch[label["label"]], end_label_index] = 1
                         span_labels[type2id_batch[label["label"]], start_label_index, end_label_index] = 1
@@ -254,6 +257,12 @@ class InBatchDataCollator:
 
                         while end_label_index <= text_end_index and word_ids[end_label_index] >= label["end"]:
                             end_label_index -= 1
+
+                        if end_label_index - start_label_index + 1 >= self.max_span_length:
+                            continue
+
+                        if start_label_index > end_label_index:
+                            continue
 
                         start_labels[type2id_batch[label["label"]], start_label_index] = 1
                         end_labels[type2id_batch[label["label"]], end_label_index] = 1
@@ -371,6 +380,9 @@ class AllLabelsDataCollator:
                         if end_label_index - start_label_index + 1 >= self.max_span_length:
                             continue
 
+                        if start_label_index > end_label_index:
+                            continue
+
                         start_labels[self.label2id[label["label"]], start_label_index] = 1
                         end_labels[self.label2id[label["label"]], end_label_index] = 1
                         span_labels[self.label2id[label["label"]], start_label_index, end_label_index] = 1
@@ -390,6 +402,12 @@ class AllLabelsDataCollator:
 
                         while end_label_index <= text_end_index and word_ids[end_label_index] >= label["end"]:
                             end_label_index -= 1
+
+                        if end_label_index - start_label_index + 1 >= self.max_span_length:
+                            continue
+
+                        if start_label_index > end_label_index:
+                            continue
 
                         start_labels[self.label2id[label["label"]], start_label_index] = 1
                         end_labels[self.label2id[label["label"]], end_label_index] = 1
@@ -533,6 +551,9 @@ class InBatchCompressedSpanCollator:
                         if end_label_index - start_label_index + 1 >= self.max_span_length:
                             continue
 
+                        if start_label_index > end_label_index:
+                            continue
+
                         start_labels[type2id_batch[label["label"]], start_label_index] = 1
                         end_labels[type2id_batch[label["label"]], end_label_index] = 1
                         span_labels[type2id_batch[label["label"]], span_lookup[(start_label_index, end_label_index)]] = 1
@@ -548,6 +569,9 @@ class InBatchCompressedSpanCollator:
                             end_label_index -= 1
 
                         if end_label_index - start_label_index + 1 >= self.max_span_length:
+                            continue
+
+                        if start_label_index > end_label_index:
                             continue
 
                         start_labels[type2id_batch[label["label"]], start_label_index] = 1
@@ -676,6 +700,9 @@ class AllLabelsCompressedSpanCollator:
                         if end_label_index - start_label_index + 1 >= self.max_span_length:
                             continue
 
+                        if start_label_index > end_label_index:
+                            continue
+
                         start_labels[self.label2id[label["label"]], start_label_index] = 1
                         end_labels[self.label2id[label["label"]], end_label_index] = 1
                         span_labels[self.label2id[label["label"]], span_lookup[(start_label_index, end_label_index)]] = 1
@@ -697,6 +724,9 @@ class AllLabelsCompressedSpanCollator:
                             end_label_index -= 1
 
                         if end_label_index - start_label_index + 1 >= self.max_span_length:
+                            continue
+
+                        if start_label_index > end_label_index:
                             continue
 
                         start_labels[self.label2id[label["label"]], start_label_index] = 1
@@ -849,6 +879,9 @@ class InBatchContrastiveDataCollator:
                         if end_label_index - start_label_index + 1 >= self.max_span_length:
                             continue
 
+                        if start_label_index > end_label_index:
+                            continue
+
                         start_negative_mask[type2id_batch[label["label"]], start_label_index] = 0
                         end_negative_mask[type2id_batch[label["label"]], end_label_index] = 0
                         span_negative_mask[type2id_batch[label["label"]], span_lookup[(start_label_index, end_label_index)]] = 0
@@ -994,6 +1027,9 @@ class AllLabelsContrastiveDataCollator:
                         if end_label_index - start_label_index + 1 >= self.max_span_length:
                             continue
 
+                        if start_label_index > end_label_index:
+                            continue
+
                         annotation.append({
                             "start": start_label_index,
                             "end": end_label_index,
@@ -1011,6 +1047,9 @@ class AllLabelsContrastiveDataCollator:
                             end_label_index -= 1
 
                         if end_label_index - start_label_index + 1 >= self.max_span_length:
+                            continue
+
+                        if start_label_index > end_label_index:
                             continue
 
                         annotation.append({
