@@ -1019,6 +1019,7 @@ class AllLabelsContrastiveDataCollator:
                             "label": label["label"]
                         })
 
+            annotations["ner"].append(annotation)
             annotations["valid_span_mask"].append(valid_span_mask)
             annotations["span_subword_indices"].append(span_subword_indices)
             annotations["span_lengths"].append(span_lengths)

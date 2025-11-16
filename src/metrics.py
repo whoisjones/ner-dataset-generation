@@ -42,7 +42,10 @@ def compute_compressed_span_predictions(span_logits, span_mask, span_mapping, id
     device = span_logits.device
 
     span_probs = torch.sigmoid(span_logits)
-    span_preds = span_probs > threshold
+    if threshold == "cls":
+        span_preds = span_probs > span_probs[:, 0:1, 0:1]
+    else:
+        span_preds = span_probs > threshold
     batch_ids, type_ids, span_ids = (span_mask & span_preds).nonzero(as_tuple=True)
     confidences = span_probs[batch_ids, type_ids, span_ids]
 
