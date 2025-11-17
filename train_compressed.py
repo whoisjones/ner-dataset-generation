@@ -39,21 +39,22 @@ def main():
     model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[-1]))
     os.makedirs(training_args.output_dir, exist_ok=True)
     
-    logger = setup_logger(training_args.output_dir)
-    logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
-    )
-    
     torch.manual_seed(training_args.seed)
 
-    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True, static_graph=False)
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     
     accelerator = Accelerator(
         mixed_precision="fp16" if getattr(training_args, 'fp16', False) else "no",
         gradient_accumulation_steps=getattr(training_args, 'gradient_accumulation_steps', 1),
         kwargs_handlers=[ddp_kwargs]
     )
+    
+    logger = setup_logger(training_args.output_dir, is_main_process=accelerator.is_main_process)
+    if accelerator.is_main_process:
+        logger.warning(
+            f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
+            + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        )
     
     data_files = {}
     if data_args.train_file is not None:
