@@ -12,7 +12,7 @@ from pathlib import Path
 
 import torch
 import transformers
-from transformers import AutoTokenizer, HfArgumentParser, TrainingArguments
+from transformers import AutoTokenizer, HfArgumentParser 
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
@@ -24,20 +24,20 @@ warnings.filterwarnings("ignore", category=FutureWarning, message=".*gamma.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
 os.environ["PYTHONWARNINGS"] = "ignore::FutureWarning"
 
-from src.model import SpanModel 
+from src.model import SpanModel, CompressedSpanModel, ContrastiveSpanModel
 from src.config import SpanModelConfig
-from src.collator import AllLabelsDataCollator
+from src.collator import AllLabelsDataCollator, AllLabelsCompressedSpanCollator, AllLabelsContrastiveDataCollator
 from src.trainer import evaluate
 from src.logger import setup_logger
-from src.args import ModelArguments, DataTrainingArguments
+from src.args import ModelArguments, DataTrainingArguments, CustomTrainingArguments
 
 transformers.logging.set_verbosity_error()
 
-pretrained_model_name_or_path = "/vol/tmp/goldejon/ner/finerweb-multi/checkpoint-5000"
-test_file = "/vol/tmp/goldejon/ner/data/thainer_no_tokens/test.jsonl"
+pretrained_model_name_or_path = "/vol/tmp/goldejon/ner/finerweb-multi-full-run-focal/best_checkpoint"
+test_file = "/vol/tmp/goldejon/ner/data/conll2003/test.jsonl"
 
 def main():
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, CustomTrainingArguments))
     model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[-1]))
     os.makedirs(training_args.output_dir, exist_ok=True)
     
@@ -60,7 +60,7 @@ def main():
     dataset = load_dataset('json', data_files=data_files)
 
     config = SpanModelConfig.from_pretrained(pretrained_model_name_or_path)
-    model = SpanModel(config=config)
+    model = CompressedSpanModel(config=config)
     model = model.from_pretrained(pretrained_model_name_or_path)
 
     token_encoder_tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
@@ -77,7 +77,7 @@ def main():
         padding="longest" if len(test_labels) <= 1000 else "max_length",
         return_tensors="pt"
     )
-    test_collator = AllLabelsDataCollator(
+    test_collator = AllLabelsCompressedSpanCollator(
         token_encoder_tokenizer, 
         type_encodings=type_encodings,
         label2id=label2id,
@@ -107,7 +107,7 @@ def main():
     logger.info(f"Test F1 Score: {test_metrics['micro']['f1']:.4f}")
     logger.info("=" * 60)
         
-    test_results_path = Path(training_args.output_dir) / "test_results_swa.json"
+    test_results_path = Path(pretrained_model_name_or_path).parent / "test_results_conll.json"
     with open(test_results_path, 'w') as f:
         json.dump({
             "test_metrics": test_metrics,
