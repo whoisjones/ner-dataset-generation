@@ -12,7 +12,7 @@ from pathlib import Path
 
 import torch
 import transformers
-from transformers import (AutoTokenizer, get_linear_schedule_with_warmup, HfArgumentParser)
+from transformers import (AutoTokenizer, get_scheduler, HfArgumentParser)
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from accelerate import Accelerator, DistributedDataParallelKwargs
@@ -44,7 +44,7 @@ def main():
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     
     accelerator = Accelerator(
-        mixed_precision="fp16" if getattr(training_args, 'fp16', False) else "no",
+        mixed_precision="bf16" if getattr(training_args, 'bf16', False) else "no",
         gradient_accumulation_steps=getattr(training_args, 'gradient_accumulation_steps', 1),
         kwargs_handlers=[ddp_kwargs]
     )
@@ -53,7 +53,7 @@ def main():
     if accelerator.is_main_process:
         logger.warning(
             f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
-            + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+            + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.bf16}"
         )
     
     data_files = {}
@@ -90,7 +90,7 @@ def main():
         prediction_threshold=model_args.prediction_threshold
     )
     model = ContrastiveSpanModel(config=config)
-
+    
     token_encoder_tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
     type_encoder_tokenizer = AutoTokenizer.from_pretrained(config.type_encoder)
     in_batch_collator = InBatchContrastiveDataCollator(
@@ -169,10 +169,12 @@ def main():
         )
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=training_args.learning_rate)
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
+    scheduler = get_scheduler(
+        name=training_args.lr_scheduler_type,
+        optimizer=optimizer,
         num_warmup_steps=training_args.warmup_steps,
-        num_training_steps=training_args.max_steps
+        num_training_steps=training_args.max_steps,
+        scheduler_specific_kwargs=training_args.lr_scheduler_kwargs
     )
     
     # Prepare model, optimizer, and dataloaders with accelerator

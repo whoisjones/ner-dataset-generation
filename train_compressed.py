@@ -44,7 +44,7 @@ def main():
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     
     accelerator = Accelerator(
-        mixed_precision="fp16" if getattr(training_args, 'fp16', False) else "no",
+        mixed_precision="bf16" if getattr(training_args, 'bf16', False) else "no",
         gradient_accumulation_steps=getattr(training_args, 'gradient_accumulation_steps', 1),
         kwargs_handlers=[ddp_kwargs]
     )
@@ -53,7 +53,7 @@ def main():
     if accelerator.is_main_process:
         logger.warning(
             f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
-            + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+            + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.bf16}"
         )
     
     data_files = {}

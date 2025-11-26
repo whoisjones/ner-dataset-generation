@@ -44,14 +44,14 @@ def main():
     logger = setup_logger(training_args.output_dir)
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.bf16}"
     )
     
     torch.manual_seed(training_args.seed)
     
     # Initialize accelerator for mixed precision and device management
     accelerator = Accelerator(
-        mixed_precision="fp16" if getattr(training_args, 'fp16', False) else "no",
+        mixed_precision="bf16" if getattr(training_args, 'bf16', False) else "no",
         gradient_accumulation_steps=getattr(training_args, 'gradient_accumulation_steps', 1)
     )
     
