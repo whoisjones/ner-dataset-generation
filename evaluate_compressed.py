@@ -6,6 +6,7 @@ Run from project root: python train.py --config configs/default.json
 
 import os
 import sys
+import glob
 import json
 import warnings
 from pathlib import Path
@@ -13,7 +14,7 @@ from pathlib import Path
 import torch
 import transformers
 from transformers import (AutoTokenizer, get_linear_schedule_with_warmup, HfArgumentParser, TrainingArguments)
-from datasets import load_dataset
+from datasets import load_dataset, DatasetDict
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
 
@@ -33,42 +34,78 @@ from src.args import ModelArguments, DataTrainingArguments
 
 transformers.logging.set_verbosity_error()
 
-pretrained_model_name_or_path = "/vol/tmp/goldejon/ner/finerweb-multi/checkpoint-5000"
+pretrained_model_name_or_paths = [
+    "/vol/tmp/goldejon/ner/finerweb-rembert-bce-cosine/best_checkpoint",
+    "/vol/tmp/goldejon/ner/finerweb-rembert-bce-linear/best_checkpoint",
+    "/vol/tmp/goldejon/ner/finerweb-rembert-bce-pos-weight/best_checkpoint",
+    "/vol/tmp/goldejon/ner/finerweb-rembert-bce-pos-weight-2/best_checkpoint",
+    "/vol/tmp/goldejon/ner/finerweb-rembert-bce-pos-weight-3/best_checkpoint",
+    "/vol/tmp/goldejon/ner/finerweb-rembert-focal/best_checkpoint",
+    "/vol/tmp/goldejon/ner/finerweb-rembert-tokenization-aware/best_checkpoint",
+]
 test_file = "/vol/tmp/goldejon/ner/data/thainer_no_tokens/test.jsonl"
+all_test_files_path = "/vol/tmp/goldejon/ner/eval_data/*"
+
+MAX_EVAL_SAMPLES_PER_DATASET = {
+    "panx": 1000,
+    "masakhaner": -1,
+    "multinerd": -1,
+    "multiconer_v1": 10000,
+    "multiconer_v2": 10000,
+    "dynamicner": -1,
+    "uner": -1,
+}
 
 def main():
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
-    model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[-1]))
-    os.makedirs(training_args.output_dir, exist_ok=True)
-    
-    logger = setup_logger(training_args.output_dir)
-    logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.bf16}"
-    )
-    
-    torch.manual_seed(training_args.seed)
-    
-    # Initialize accelerator for mixed precision and device management
-    accelerator = Accelerator(
-        mixed_precision="bf16" if getattr(training_args, 'bf16', False) else "no",
-        gradient_accumulation_steps=getattr(training_args, 'gradient_accumulation_steps', 1)
-    )
-    
+    # run_single_eval()
+    run_complete_eval()
+
+def run_single_eval():
     data_files = {}
     data_files["test"] = test_file
     dataset = load_dataset('json', data_files=data_files)
+    run_eval(dataset)
 
+def run_complete_eval():
+    for pretrained_model_name_or_path in pretrained_model_name_or_paths:
+        model_name = pretrained_model_name_or_path.split("/")[-2]
+        for eval_dataset in glob.glob(all_test_files_path):
+            for language_dataset in glob.glob(eval_dataset + "/*"):
+                dataset = DatasetDict.load_from_disk(language_dataset)
+
+                eval_split = "test" if "test" in dataset else "dev"
+                test_split = dataset[eval_split]
+
+                max_samples = MAX_EVAL_SAMPLES_PER_DATASET[language_dataset.split("/")[-2]]
+                if max_samples == -1 or max_samples > len(test_split):
+                    test_split = test_split.shuffle(seed=42)
+                else:
+                    test_split = test_split.shuffle(seed=42).select(range(max_samples))
+                os.makedirs(f"results/{model_name}/{language_dataset.split("/")[-2]}", exist_ok=True)
+                result_save_path = f"results/{model_name}/{language_dataset.split("/")[-2]}/{language_dataset.split("/")[-1]}.json"
+                run_eval(test_split, pretrained_model_name_or_path, result_save_path)
+
+def run_eval(dataset, pretrained_model_name_or_path, result_save_path):
+    logger = setup_logger('eval.log')
+    logger.warning(
+        f"Process rank: {0}, device: cuda, n_gpu: 1, "
+        + f"distributed training: False, 16-bits training: True"
+    )
+    
+    torch.manual_seed(42)
+    
+    accelerator = Accelerator(
+        mixed_precision="bf16"
+    )
+    
     config = SpanModelConfig.from_pretrained(pretrained_model_name_or_path)
-    model = CompressedSpanModel(config=config)
+    model = CompressedSpanModel(config=config).to("cuda")
     model = model.from_pretrained(pretrained_model_name_or_path)
 
     token_encoder_tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
     type_encoder_tokenizer = AutoTokenizer.from_pretrained(config.type_encoder)
 
-    if "test" not in dataset:
-        raise ValueError("--do_predict requires a test file.")
-    test_labels = list(set([span["label"] for sample in dataset["test"] for span in sample["token_spans" if data_args.annotation_format == "tokens" else "char_spans"]]))
+    test_labels = list(set([span["label"] for sample in dataset for span in sample["token_spans"]]))
     label2id = {label: idx for idx, label in enumerate(test_labels)}
     type_encodings = type_encoder_tokenizer(
         list(label2id.keys()),
@@ -81,13 +118,13 @@ def main():
         token_encoder_tokenizer, 
         type_encodings=type_encodings,
         label2id=label2id,
-        max_seq_length=data_args.max_seq_length, 
-        format=data_args.annotation_format,
-        loss_masking=data_args.loss_masking
+        max_seq_length=512, 
+        format="tokens",
+        loss_masking="subwords"
     )
     test_dataloader = DataLoader(
-        dataset["test"],
-        batch_size=training_args.per_device_eval_batch_size,
+        dataset,
+        batch_size=12,
         shuffle=False,
         collate_fn=test_collator,
         num_workers=0
@@ -107,13 +144,11 @@ def main():
     logger.info(f"Test F1 Score: {test_metrics['micro']['f1']:.4f}")
     logger.info("=" * 60)
         
-    test_results_path = Path(training_args.output_dir) / "test_results_swa.json"
-    with open(test_results_path, 'w') as f:
+    with open(result_save_path, 'w') as f:
         json.dump({
             "test_metrics": test_metrics,
-            "config": config.to_dict(),
         }, f, indent=2)
-    logger.info(f"\nTest results saved to {test_results_path}")
+    logger.info(f"\nTest results saved to {result_save_path}")
 
 
 if __name__ == "__main__":
