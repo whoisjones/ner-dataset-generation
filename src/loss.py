@@ -54,6 +54,7 @@ class ContrastiveLoss(nn.Module):
         prob_mask: torch.tensor = None
     ) -> torch.tensor:
         batch_size, seq_length = scores.size(0), scores.size(1)
+        scores = scores / 2.0
         if len(scores.shape) == 3:
             scores = scores.view(batch_size, -1)
             mask = mask.view(batch_size, -1)

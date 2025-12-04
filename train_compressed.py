@@ -97,9 +97,11 @@ def main():
             start_loss_weight=model_args.start_loss_weight,
             end_loss_weight=model_args.end_loss_weight,
             span_loss_weight=model_args.span_loss_weight,
-            start_pos_weight=model_args.start_pos_weight,
-            end_pos_weight=model_args.end_pos_weight,
-            span_pos_weight=model_args.span_pos_weight,
+            bce_start_pos_weight=model_args.bce_start_pos_weight,
+            bce_end_pos_weight=model_args.bce_end_pos_weight,
+            bce_span_pos_weight=model_args.bce_span_pos_weight,
+            contrastive_threshold_loss_weight=model_args.contrastive_threshold_loss_weight,
+            contrastive_span_loss_weight=model_args.contrastive_span_loss_weight,
             type_encoder_pooling=model_args.type_encoder_pooling,
             prediction_threshold=model_args.prediction_threshold
         )

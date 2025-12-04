@@ -37,14 +37,23 @@ class ModelArguments:
     span_loss_weight: float = field(
         default=0.6, metadata={"help": "Weight for the span loss."}
     )
-    start_pos_weight: Optional[float] = field(
+    bce_start_pos_weight: Optional[float] = field(
         default=None, metadata={"help": "Positive weight for the start loss. If None, no pos_weight is applied."}
     )
-    end_pos_weight: Optional[float] = field(
+    bce_end_pos_weight: Optional[float] = field(
         default=None, metadata={"help": "Positive weight for the end loss. If None, no pos_weight is applied."}
     )
-    span_pos_weight: Optional[float] = field(
+    bce_span_pos_weight: Optional[float] = field(
         default=None, metadata={"help": "Positive weight for the span loss. If None, no pos_weight is applied."}
+    )
+    contrastive_threshold_loss_weight: float = field(
+        default=0.5, metadata={"help": "Weight for the threshold loss."}
+    )
+    contrastive_span_loss_weight: float = field(
+        default=0.5, metadata={"help": "Weight for the span loss."}
+    )
+    contrastive_tau: float = field(
+        default=1.0, metadata={"help": "Temperature for the contrastive loss."}
     )
     type_encoder_pooling: str = field(
         default="cls", metadata={"help": "Pooling method for type encoder. Options: 'cls' (uses CLS token) or 'mean' (mean pooling)."}

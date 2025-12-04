@@ -145,16 +145,16 @@ class SpanModel(PreTrainedModel):
 
         if labels is not None:
             start_pos_weight = None
-            if self.config.start_pos_weight is not None:
-                start_pos_weight = torch.tensor(self.config.start_pos_weight, device=start_scores.device, dtype=start_scores.dtype)
+            if self.config.bce_start_pos_weight is not None:
+                start_pos_weight = torch.tensor(self.config.bce_start_pos_weight, device=start_scores.device, dtype=start_scores.dtype)
             
             end_pos_weight = None
-            if self.config.end_pos_weight is not None:
-                end_pos_weight = torch.tensor(self.config.end_pos_weight, device=end_scores.device, dtype=end_scores.dtype)
+            if self.config.bce_end_pos_weight is not None:
+                end_pos_weight = torch.tensor(self.config.bce_end_pos_weight, device=end_scores.device, dtype=end_scores.dtype)
             
             span_pos_weight = None
-            if self.config.span_pos_weight is not None:
-                span_pos_weight = torch.tensor(self.config.span_pos_weight, device=span_scores.device, dtype=span_scores.dtype)
+            if self.config.bce_span_pos_weight is not None:
+                span_pos_weight = torch.tensor(self.config.bce_span_pos_weight, device=span_scores.device, dtype=span_scores.dtype)
             
             start_loss = self.loss_fn(
                 start_scores, 
@@ -340,16 +340,16 @@ class CompressedSpanModel(PreTrainedModel):
 
         if labels is not None and self.training:
             start_pos_weight = None
-            if self.config.start_pos_weight is not None:
-                start_pos_weight = torch.tensor(self.config.start_pos_weight, device=start_scores.device, dtype=start_scores.dtype)
+            if self.config.bce_start_pos_weight is not None:
+                start_pos_weight = torch.tensor(self.config.bce_start_pos_weight, device=start_scores.device, dtype=start_scores.dtype)
             
             end_pos_weight = None
-            if self.config.end_pos_weight is not None:
-                end_pos_weight = torch.tensor(self.config.end_pos_weight, device=end_scores.device, dtype=end_scores.dtype)
+            if self.config.bce_end_pos_weight is not None:
+                end_pos_weight = torch.tensor(self.config.bce_end_pos_weight, device=end_scores.device, dtype=end_scores.dtype)
             
             span_pos_weight = None
-            if self.config.span_pos_weight is not None:
-                span_pos_weight = torch.tensor(self.config.span_pos_weight, device=span_scores.device, dtype=span_scores.dtype)
+            if self.config.bce_span_pos_weight is not None:
+                span_pos_weight = torch.tensor(self.config.bce_span_pos_weight, device=span_scores.device, dtype=span_scores.dtype)
             
             start_loss = self.loss_fn(
                 start_scores, 
@@ -529,9 +529,9 @@ class ContrastiveSpanModel(PreTrainedModel):
         span_scores = self.span_logit_scale.exp() * torch.einsum("BSH,CH->BCS", token_span_output, type_output)
 
         if labels is not None and self.training:
-            flat_start_scores = start_scores.reshape(B * C, S)
-            flat_end_scores = end_scores.reshape(B * C, S)
-            flat_span_scores = span_scores.reshape(B * C, span_scores.size(-1))
+            flat_start_scores = start_scores.reshape(B * C, S) / self.config.contrastive_tau
+            flat_end_scores = end_scores.reshape(B * C, S) / self.config.contrastive_tau
+            flat_span_scores = span_scores.reshape(B * C, span_scores.size(-1)) / self.config.contrastive_tau
             start_negative_mask = labels["start_negative_mask"].reshape(B * C, S)
             end_negative_mask = labels["end_negative_mask"].reshape(B * C, S)
             span_negative_mask = labels["span_negative_mask"].reshape(B * C, span_scores.size(-1))
@@ -549,9 +549,9 @@ class ContrastiveSpanModel(PreTrainedModel):
             batch_indices, type_indices, start_indices, end_indices, span_indices = labels["ner_indices"]
             ner_start_mask, ner_end_mask, ner_span_mask = labels["ner_start_mask"], labels["ner_end_mask"], labels["ner_span_mask"]
 
-            start_loss = self.loss_fn(start_scores[batch_indices, type_indices], start_indices, ner_start_mask)
-            end_loss = self.loss_fn(end_scores[batch_indices, type_indices], end_indices, ner_end_mask)
-            span_loss = self.loss_fn(span_scores[batch_indices, type_indices], span_indices, ner_span_mask)
+            start_loss = self.loss_fn(start_scores[batch_indices, type_indices] / self.config.contrastive_tau, start_indices, ner_start_mask)
+            end_loss = self.loss_fn(end_scores[batch_indices, type_indices] / self.config.contrastive_tau, end_indices, ner_end_mask)
+            span_loss = self.loss_fn(span_scores[batch_indices, type_indices] / self.config.contrastive_tau, span_indices, ner_span_mask)
             
             loss = (
                 self.config.start_loss_weight * start_loss +
@@ -559,7 +559,7 @@ class ContrastiveSpanModel(PreTrainedModel):
                 self.config.span_loss_weight * span_loss
             )
 
-            total_loss = threshold_loss + loss
+            total_loss = self.config.contrastive_threshold_loss_weight * threshold_loss + self.config.contrastive_span_loss_weight * loss
 
             return SpanModelOutput(loss=total_loss, start_logits=start_scores, end_logits=end_scores, span_logits=span_scores)
         else:
