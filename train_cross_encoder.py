@@ -77,6 +77,12 @@ def main():
         model = CrossEncoderModel.from_pretrained(model_args.model_checkpoint)
         # Update model config
         model.config = config
+        # Load tokenizer from checkpoint (or base model if not found)
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(model_args.model_checkpoint)
+        except Exception:
+            tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
+            tokenizer.add_tokens(["[LABEL]"], special_tokens=True)
     else:
         # Validate that token_encoder and type_encoder are provided
         if model_args.token_encoder is None or model_args.type_encoder is None:
@@ -190,7 +196,6 @@ def main():
     
     if training_args.do_train:
         config.save_pretrained(Path(training_args.output_dir))
-        tokenizer.save_pretrained(Path(training_args.output_dir))
         final_step, best_checkpoint_path, best_f1 = train(
             model=model,
             train_dataloader=train_dataloader,
@@ -198,7 +203,8 @@ def main():
             optimizer=optimizer,
             scheduler=scheduler,
             accelerator=accelerator,
-            args=training_args
+            args=training_args,
+            tokenizer=tokenizer
         )
 
     if training_args.do_predict:

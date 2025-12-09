@@ -76,7 +76,7 @@ def evaluate(model, dataloader, accelerator):
     return metrics
 
 
-def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, accelerator, args):
+def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, accelerator, args, tokenizer=None):
     logger = setup_logger(args.output_dir, is_main_process=accelerator.is_main_process)
     model.train()
     total_loss = 0.0
@@ -163,6 +163,8 @@ def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, accele
             if accelerator.is_main_process:
                 unwrapped_model = accelerator.unwrap_model(model)
                 unwrapped_model.save_pretrained(str(checkpoint_dir))
+                if tokenizer is not None:
+                    tokenizer.save_pretrained(checkpoint_dir / "tokenizer")
                 logger.info(f"Saved checkpoint to {checkpoint_dir}")
             
             current_f1 = eval_metrics['micro']['f1']
