@@ -24,9 +24,9 @@ warnings.filterwarnings("ignore", category=FutureWarning, message=".*gamma.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
 os.environ["PYTHONWARNINGS"] = "ignore::FutureWarning"
 
-from src.model import CrossEncoderModel
+from src.model import BiEncoderModel
 from src.config import SpanModelConfig
-from src.collator import InBatchCrossEncoderCollator, AllLabelsCrossEncoderCollator
+from src.collator import TrainCollatorBiEncoder, EvalCollatorBiEncoder
 from src.trainer import train, evaluate
 from src.logger import setup_logger
 from src.args import ModelArguments, DataTrainingArguments, CustomTrainingArguments
@@ -74,15 +74,9 @@ def main():
         # Override max_span_length from data_args as it's data-dependent
         config.max_span_length = data_args.max_span_length
         # Load model from checkpoint
-        model = CrossEncoderModel.from_pretrained(model_args.model_checkpoint)
+        model = BiEncoderModel.from_pretrained(model_args.model_checkpoint)
         # Update model config
         model.config = config
-        # Load tokenizer from checkpoint (or base model if not found)
-        try:
-            tokenizer = AutoTokenizer.from_pretrained(model_args.model_checkpoint)
-        except Exception:
-            tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
-            tokenizer.add_tokens(["[LABEL]"], special_tokens=True)
     else:
         # Validate that token_encoder and type_encoder are provided
         if model_args.token_encoder is None or model_args.type_encoder is None:
@@ -108,16 +102,17 @@ def main():
             bce_span_pos_weight=model_args.bce_span_pos_weight,
             contrastive_threshold_loss_weight=model_args.contrastive_threshold_loss_weight,
             contrastive_span_loss_weight=model_args.contrastive_span_loss_weight,
+            contrastive_tau=model_args.contrastive_tau,
             type_encoder_pooling=model_args.type_encoder_pooling,
             prediction_threshold=model_args.prediction_threshold
         )
-        tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
-        tokenizer.add_tokens(["[LABEL]"], special_tokens=True)
-        model = CrossEncoderModel(config=config)
-        model.token_encoder.resize_token_embeddings(len(tokenizer.vocab) + 1)
+        model = BiEncoderModel(config=config)
 
-    in_batch_collator = InBatchCrossEncoderCollator(
-        tokenizer, 
+    token_encoder_tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
+    type_encoder_tokenizer = AutoTokenizer.from_pretrained(config.type_encoder)
+    train_collator = TrainCollatorBiEncoder(
+        token_encoder_tokenizer, 
+        type_encoder_tokenizer, 
         max_seq_length=data_args.max_seq_length, 
         format=data_args.annotation_format,
         loss_masking=data_args.loss_masking
@@ -130,7 +125,7 @@ def main():
             dataset["train"],
             batch_size=training_args.per_device_train_batch_size,
             shuffle=True,
-            collate_fn=in_batch_collator,
+            collate_fn=train_collator,
             num_workers=0
         )
 
@@ -139,8 +134,16 @@ def main():
             raise ValueError("--do_eval requires a validation file.")
         validation_labels = list(set([span["label"] for sample in dataset["validation"] for span in sample["token_spans" if data_args.annotation_format == "tokens" else "char_spans"]]))
         label2id = {label: idx for idx, label in enumerate(validation_labels)}
-        eval_collator = AllLabelsCrossEncoderCollator(
-            tokenizer, 
+        type_encodings = type_encoder_tokenizer(
+            list(label2id.keys()),
+            truncation=True,
+            max_length=64,
+            padding="longest" if len(validation_labels) <= 1000 else "max_length",
+            return_tensors="pt"
+        )
+        eval_collator = EvalCollatorBiEncoder(
+            token_encoder_tokenizer, 
+            type_encodings=type_encodings,
             label2id=label2id,
             max_seq_length=data_args.max_seq_length, 
             format=data_args.annotation_format,
@@ -159,8 +162,16 @@ def main():
             raise ValueError("--do_predict requires a test file.")
         test_labels = list(set([span["label"] for sample in dataset["test"] for span in sample["token_spans" if data_args.annotation_format == "tokens" else "char_spans"]]))
         label2id = {label: idx for idx, label in enumerate(test_labels)}
-        test_collator = AllLabelsCrossEncoderCollator(
-            tokenizer, 
+        type_encodings = type_encoder_tokenizer(
+            list(label2id.keys()),
+            truncation=True,
+            max_length=64,
+            padding="longest" if len(test_labels) <= 1000 else "max_length",
+            return_tensors="pt"
+        )
+        test_collator = EvalCollatorBiEncoder(
+            token_encoder_tokenizer, 
+            type_encodings=type_encodings,
             label2id=label2id,
             max_seq_length=data_args.max_seq_length, 
             format=data_args.annotation_format,
@@ -203,8 +214,7 @@ def main():
             optimizer=optimizer,
             scheduler=scheduler,
             accelerator=accelerator,
-            args=training_args,
-            tokenizer=tokenizer
+            args=training_args
         )
 
     if training_args.do_predict:
@@ -217,7 +227,7 @@ def main():
                 logger.info(f"\nLoading best model from checkpoint: {best_checkpoint_path}")
                 logger.info(f"Best validation F1: {best_f1:.4f}")
             # Load the best model
-            best_model = CrossEncoderModel.from_pretrained(str(best_checkpoint_path))
+            best_model = BiEncoderModel.from_pretrained(str(best_checkpoint_path))
             best_model.eval()
             best_model = accelerator.prepare(best_model)
             model = best_model

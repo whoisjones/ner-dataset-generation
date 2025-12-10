@@ -1,20 +1,25 @@
-from .in_batch import InBatchDataCollator
-from .all_labels import AllLabelsDataCollator
-from .in_batch_compressed import InBatchCompressedSpanCollator
-from .all_labels_compressed import AllLabelsCompressedSpanCollator
-from .in_batch_contrastive import InBatchContrastiveDataCollator
-from .all_labels_contrastive import AllLabelsContrastiveDataCollator
-from .in_batch_cross_encoder import InBatchCrossEncoderCollator
-from .all_labels_cross_encoder import AllLabelsCrossEncoderCollator
+from .train_collator_biencoder import TrainCollatorBiEncoder
+from .eval_collator_biencoder import EvalCollatorBiEncoder
+from .train_collator_biencoder_contrastive import TrainCollatorContrastiveBiEncoder
+from .eval_collator_biencoder_contrastive import EvalCollatorContrastiveBiEncoder
+from .train_collator_biencoder_compressed import TrainCollatorCompressedBiEncoder
+from .eval_collator_biencoder_compressed import EvalCollatorCompressedBiEncoder
+from .train_collator_crossencoder_compressed import TrainCollatorCompressedCrossEncoder
+from .eval_collator_crossencoder_compressed import EvalCollatorCompressedCrossEncoder
+from .train_collator_crossencoder_contrastive import TrainCollatorContrastiveCrossEncoder
+from .eval_collator_crossencoder_contrastive import EvalCollatorContrastiveCrossEncoder
+
 
 __all__ = [
-    "InBatchDataCollator",
-    "AllLabelsDataCollator",
-    "InBatchCompressedSpanCollator",
-    "AllLabelsCompressedSpanCollator",
-    "InBatchContrastiveDataCollator",
-    "AllLabelsContrastiveDataCollator",
-    "InBatchCrossEncoderCollator",
-    "AllLabelsCrossEncoderCollator",
+    "TrainCollatorBiEncoder",
+    "EvalCollatorBiEncoder",
+    "TrainCollatorContrastiveBiEncoder",
+    "EvalCollatorContrastiveBiEncoder",
+    "TrainCollatorCompressedBiEncoder",
+    "EvalCollatorCompressedBiEncoder",
+    "TrainCollatorCompressedCrossEncoder",
+    "EvalCollatorCompressedCrossEncoder",
+    "TrainCollatorContrastiveCrossEncoder",
+    "EvalCollatorContrastiveCrossEncoder",
 ]
 

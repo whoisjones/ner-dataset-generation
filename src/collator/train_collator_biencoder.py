@@ -1,7 +1,8 @@
+import random
 import torch
 from .masks import all_spans_mask, subwords_mask
 
-class InBatchDataCollator:
+class TrainCollatorBiEncoder:
     def __init__(self, token_encoder_tokenizer, type_encoder_tokenizer, max_seq_length=512, max_span_length=30, format='text', loss_masking='none'):
         self.token_encoder_tokenizer = token_encoder_tokenizer
         self.type_encoder_tokenizer = type_encoder_tokenizer
@@ -35,7 +36,7 @@ class InBatchDataCollator:
             for span in sample["token_spans" if self.format == 'tokens' else "char_spans"]:
                 if span["label"] not in unique_types:
                     unique_types.append(span["label"])
-        unique_types = sorted(unique_types)
+        random.shuffle(unique_types)
         type2id_batch = {entity_type: idx for idx, entity_type in enumerate(unique_types)}
         
         if not unique_types:

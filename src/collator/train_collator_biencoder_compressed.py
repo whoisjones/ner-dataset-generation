@@ -1,13 +1,11 @@
+import random
 import torch
 from .masks import compressed_all_spans_mask, compressed_subwords_mask
 
-class AllLabelsCompressedSpanCollator:
-    def __init__(self, tokenizer, type_encodings, label2id, max_seq_length=512, max_span_length=30, format='text', loss_masking='none'):
-        self.tokenizer = tokenizer
-        self.type_input_ids = type_encodings["input_ids"]
-        self.type_attention_mask = type_encodings["attention_mask"]
-        self.type_token_type_ids = type_encodings["token_type_ids"] if "token_type_ids" in type_encodings else None
-        self.label2id = label2id
+class TrainCollatorCompressedBiEncoder:
+    def __init__(self, token_encoder_tokenizer, type_encoder_tokenizer, max_seq_length=512, max_span_length=30, format='text', loss_masking='none'):
+        self.token_encoder_tokenizer = token_encoder_tokenizer
+        self.type_encoder_tokenizer = type_encoder_tokenizer
         self.max_seq_length = max_seq_length
         self.max_span_length = max_span_length
         self.format = format
@@ -23,7 +21,7 @@ class AllLabelsCompressedSpanCollator:
         else:
             raise ValueError(f"Invalid format: {self.format}")
         
-        token_encodings = self.tokenizer(
+        token_encodings = self.token_encoder_tokenizer(
             texts,
             padding=True,
             truncation=True,
@@ -33,11 +31,29 @@ class AllLabelsCompressedSpanCollator:
             is_split_into_words=True if self.format == 'tokens' else False
         )
         
+        unique_types = []
+        for sample in batch:
+            for span in sample["token_spans" if self.format == 'tokens' else "char_spans"]:
+                if span["label"] not in unique_types:
+                    unique_types.append(span["label"])
+        random.shuffle(unique_types)
+        type2id_batch = {entity_type: idx for idx, entity_type in enumerate(unique_types)}
+        
+        if not unique_types:
+            return {}
+        
+        type_encodings = self.type_encoder_tokenizer(
+            unique_types,
+            padding=True,
+            truncation=True,
+            max_length=64,
+            return_tensors="pt"
+        )
+
         if self.format == 'text':
             offset_mapping = token_encodings.pop("offset_mapping")
 
         annotations = {
-            "ner": [],
             "start_labels": [],
             "end_labels": [],
             "span_labels": [],
@@ -61,17 +77,15 @@ class AllLabelsCompressedSpanCollator:
 
             span_lookup = {span: idx for idx, span in enumerate(spans_idx)}
 
-            valid_start_mask = torch.tensor([start_mask[:] for _ in range(len(self.label2id))])
-            valid_end_mask = torch.tensor([end_mask[:] for _ in range(len(self.label2id))])
-            valid_span_mask = torch.tensor([span_mask[:] for _ in range(len(self.label2id))])
+            valid_start_mask = torch.tensor([start_mask[:] for _ in unique_types])
+            valid_end_mask = torch.tensor([end_mask[:] for _ in unique_types])
+            valid_span_mask = torch.tensor([span_mask[:] for _ in unique_types])
             span_subword_indices = torch.tensor(spans_idx)
             span_lengths = torch.tensor(span_lengths)
 
-            start_labels = torch.zeros(len(self.label2id), len(input_ids))
-            end_labels = torch.zeros(len(self.label2id), len(input_ids))
-            span_labels = torch.zeros(len(self.label2id), len(spans_idx))
-
-            annotation = []
+            start_labels = torch.zeros(len(unique_types), len(input_ids))
+            end_labels = torch.zeros(len(unique_types), len(input_ids))
+            span_labels = torch.zeros(len(unique_types), len(spans_idx))
 
             for label in sample_labels:
                 if self.format == 'text':
@@ -92,15 +106,9 @@ class AllLabelsCompressedSpanCollator:
                         if start_label_index > end_label_index:
                             continue
 
-                        start_labels[self.label2id[label["label"]], start_label_index] = 1
-                        end_labels[self.label2id[label["label"]], end_label_index] = 1
-                        span_labels[self.label2id[label["label"]], span_lookup[(start_label_index, end_label_index)]] = 1
-
-                        annotation.append({
-                            "start": start_label_index,
-                            "end": end_label_index,
-                            "label": label["label"]
-                        })
+                        start_labels[type2id_batch[label["label"]], start_label_index] = 1
+                        end_labels[type2id_batch[label["label"]], end_label_index] = 1
+                        span_labels[type2id_batch[label["label"]], span_lookup[(start_label_index, end_label_index)]] = 1
 
                 elif self.format == 'tokens':
                     word_ids = token_encodings.word_ids(i)
@@ -118,17 +126,10 @@ class AllLabelsCompressedSpanCollator:
                         if start_label_index > end_label_index:
                             continue
 
-                        start_labels[self.label2id[label["label"]], start_label_index] = 1
-                        end_labels[self.label2id[label["label"]], end_label_index] = 1
-                        span_labels[self.label2id[label["label"]], span_lookup[(start_label_index, end_label_index)]] = 1
+                        start_labels[type2id_batch[label["label"]], start_label_index] = 1
+                        end_labels[type2id_batch[label["label"]], end_label_index] = 1
+                        span_labels[type2id_batch[label["label"]], span_lookup[(start_label_index, end_label_index)]] = 1
 
-                        annotation.append({
-                            "start": start_label_index,
-                            "end": end_label_index,
-                            "label": label["label"]
-                        })
-
-            annotations["ner"].append(annotation)
             annotations["start_labels"].append(start_labels)
             annotations["end_labels"].append(end_labels)
             annotations["span_labels"].append(span_labels)
@@ -155,17 +156,16 @@ class AllLabelsCompressedSpanCollator:
             token_encoder_inputs["token_type_ids"] = token_encodings["token_type_ids"]
         
         type_encoder_inputs = {
-            "input_ids": self.type_input_ids,
-            "attention_mask": self.type_attention_mask
+            "input_ids": type_encodings["input_ids"],
+            "attention_mask": type_encodings["attention_mask"]
         }
-        if self.type_token_type_ids is not None:
-            type_encoder_inputs["token_type_ids"] = self.type_token_type_ids
+        if "token_type_ids" in type_encodings:
+            type_encoder_inputs["token_type_ids"] = type_encodings["token_type_ids"]
 
         batch = {
             "token_encoder_inputs": token_encoder_inputs,
             "type_encoder_inputs": type_encoder_inputs,
-            "labels": annotations,
-            "id2label": {idx: label for label, idx in self.label2id.items()}
+            "labels": annotations
         }
 
         return batch

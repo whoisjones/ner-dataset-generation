@@ -2,7 +2,7 @@ import random
 import torch
 from .masks import compressed_all_spans_mask_cross_encoder, compressed_subwords_mask_cross_encoder
 
-class InBatchCrossEncoderCollator:
+class TrainCollatorCompressedCrossEncoder:
     def __init__(self, token_encoder_tokenizer, max_seq_length=512, max_span_length=30, format='text', loss_masking='none'):
         self.token_encoder_tokenizer = token_encoder_tokenizer
         self.max_seq_length = max_seq_length
@@ -31,9 +31,14 @@ class InBatchCrossEncoderCollator:
         if not unique_types:
             return {}
 
-        label_text = "[LABEL] " + " [LABEL] ".join(unique_types) + " [SEP]"
-        label_char_offset = len(label_text)
-        input_texts = [label_text + text for text in texts]
+        if self.format == 'text':
+            label_text = "[LABEL] " + " [LABEL] ".join(unique_types) + " [SEP]"
+            label_offset = len(label_text)
+            input_texts = [label_text + text for text in texts]
+        elif self.format == 'tokens':
+            label_list = [tok for label in unique_types for tok in ('[LABEL]', label)] + ['[SEP]']
+            label_offset = len(label_list)
+            input_texts = [label_list + text for text in texts]
         
         token_encodings = self.token_encoder_tokenizer(
             input_texts,
@@ -45,7 +50,9 @@ class InBatchCrossEncoderCollator:
             is_split_into_words=True if self.format == 'tokens' else False
         )
 
-        offset_mapping = token_encodings.pop("offset_mapping")
+        if self.format == 'text':
+            offset_mapping = token_encodings.pop("offset_mapping")
+
         label_token_subword_positions = [i for i, input_id in enumerate(token_encodings['input_ids'][0]) if input_id == self.token_encoder_tokenizer.convert_tokens_to_ids("[LABEL]")]
 
         annotations = {
@@ -65,12 +72,11 @@ class InBatchCrossEncoderCollator:
 
             if self.loss_masking == 'subwords':
                 word_ids = token_encodings.word_ids(i)
-                offsets = offset_mapping[i]
-                text_start_index, text_end_index, start_mask, end_mask, span_mask, spans_idx, span_lengths = compressed_subwords_mask_cross_encoder(input_ids, word_ids, self.max_span_length, label_char_offset, offsets)
+                text_start_index, text_end_index, start_mask, end_mask, span_mask, spans_idx, span_lengths = compressed_subwords_mask_cross_encoder(input_ids, word_ids, self.max_span_length, label_offset)
             else:
                 sequence_ids = token_encodings.sequence_ids(i)
                 offsets = offset_mapping[i]
-                text_start_index, text_end_index, start_mask, end_mask, span_mask, spans_idx, span_lengths = compressed_all_spans_mask_cross_encoder(input_ids, sequence_ids, self.max_span_length, label_char_offset, offsets)
+                text_start_index, text_end_index, start_mask, end_mask, span_mask, spans_idx, span_lengths = compressed_all_spans_mask_cross_encoder(input_ids, sequence_ids, self.max_span_length, label_offset, offsets)
 
             span_lookup = {span: idx for idx, span in enumerate(spans_idx)}
 
@@ -86,13 +92,13 @@ class InBatchCrossEncoderCollator:
 
             for label in sample_labels:
                 if self.format == 'text':
-                    if offsets[text_start_index][0] <= label["start"] + label_char_offset and offsets[text_end_index][1] >= label["end"] + label_char_offset:
+                    if offsets[text_start_index][0] <= label["start"] + label_offset and offsets[text_end_index][1] >= label["end"] + label_offset:
                         start_label_index, end_label_index = text_start_index, text_end_index
-                        while start_label_index <= text_end_index and offsets[start_label_index][0] <= label["start"] + label_char_offset:
+                        while start_label_index <= text_end_index and offsets[start_label_index][0] <= label["start"] + label_offset:
                             start_label_index += 1
                         start_label_index -= 1
 
-                        while offsets[end_label_index][1] >= label["end"] + label_char_offset:
+                        while offsets[end_label_index][1] >= label["end"] + label_offset:
                             end_label_index -= 1
                         end_label_index += 1
 
@@ -108,12 +114,12 @@ class InBatchCrossEncoderCollator:
 
                 elif self.format == 'tokens':
                     word_ids = token_encodings.word_ids(i)
-                    if label["start"] in word_ids and label["end"] - 1 in word_ids:
+                    if label["start"] + label_offset in word_ids and label["end"] - 1 + label_offset in word_ids:
                         start_label_index, end_label_index = text_start_index, text_end_index
-                        while start_label_index <= text_end_index and word_ids[start_label_index] != label["start"]:
+                        while start_label_index <= text_end_index and word_ids[start_label_index] != label["start"] + label_offset:
                             start_label_index += 1
 
-                        while end_label_index <= text_end_index and word_ids[end_label_index] >= label["end"]:
+                        while end_label_index <= text_end_index and word_ids[end_label_index] >= label["end"] + label_offset:
                             end_label_index -= 1
 
                         if end_label_index - start_label_index + 1 >= self.max_span_length:
@@ -122,9 +128,9 @@ class InBatchCrossEncoderCollator:
                         if start_label_index > end_label_index:
                             continue
 
-                        start_labels[type2id_batch[label["label"]], start_label_index] = 1
-                        end_labels[type2id_batch[label["label"]], end_label_index] = 1
-                        span_labels[type2id_batch[label["label"]], span_lookup[(start_label_index, end_label_index)]] = 1
+                        start_labels[type2id_batch[label["label"]], start_label_index - text_start_index] = 1
+                        end_labels[type2id_batch[label["label"]], end_label_index - text_start_index] = 1
+                        span_labels[type2id_batch[label["label"]], span_lookup[(start_label_index - text_start_index, end_label_index - text_start_index)]] = 1
 
             annotations["start_labels"].append(start_labels)
             annotations["end_labels"].append(end_labels)

@@ -2,27 +2,27 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
-from transformers import AutoModel, AutoConfig, PreTrainedModel, MT5EncoderModel
+from transformers import AutoModel, AutoConfig, PreTrainedModel, MT5EncoderModel, AutoTokenizer
 from pathlib import Path
 
 from .base import SpanModelOutput, mlp
 from ..config import SpanModelConfig
 from ..loss import ContrastiveLoss
 
-class ContrastiveSpanModel(PreTrainedModel):
-    """Contrastive span model."""
+class ContrastiveCrossEncoderModel(PreTrainedModel):
+    """Dual encoder with span marker module."""
 
     def __init__(self, config):
         super().__init__(config)
-        token_config = AutoConfig.from_pretrained(config.token_encoder)
-        type_config = AutoConfig.from_pretrained(config.type_encoder)
+        self.config = config
+        token_config = AutoConfig.from_pretrained(self.config.token_encoder)
 
         self.max_span_length = config.max_span_length
         self.dropout = nn.Dropout(config.dropout)
         self.linear_hidden_size = config.linear_hidden_size
         self.config.pruned_heads = token_config.pruned_heads
 
-        self.type_linear = mlp(type_config.hidden_size, config.linear_hidden_size, config.dropout)
+        self.type_linear = mlp(token_config.hidden_size, config.linear_hidden_size, config.dropout)
         self.token_start_linear = mlp(token_config.hidden_size, config.linear_hidden_size, config.dropout)
         self.token_end_linear = mlp(token_config.hidden_size, config.linear_hidden_size, config.dropout)
         self.token_span_linear = mlp(config.linear_hidden_size * 2 + config.span_width_embedding_size, config.linear_hidden_size, config.dropout)
@@ -36,13 +36,10 @@ class ContrastiveSpanModel(PreTrainedModel):
             self.token_encoder = MT5EncoderModel.from_pretrained(config.token_encoder, config=token_config)
         else:
             self.token_encoder = AutoModel.from_pretrained(config.token_encoder, config=token_config)
-        if "mt5" in config.type_encoder:
-            self.type_encoder = MT5EncoderModel.from_pretrained(config.type_encoder, config=type_config)
-        else:
-            self.type_encoder = AutoModel.from_pretrained(config.type_encoder, config=type_config)
+
         if config.loss_fn != "contrastive":
             raise ValueError(f"Invalid loss function: {config.loss_fn}")
-        self.loss_fn = ContrastiveLoss()
+        self.loss_fn = ContrastiveLoss(tau=config.contrastive_tau)
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -66,37 +63,24 @@ class ContrastiveSpanModel(PreTrainedModel):
     def forward(
         self, 
         token_encoder_inputs: dict = None,
-        type_encoder_inputs: dict = None,
-        labels: dict = None
+        labels: dict = None,
+        **kwargs
     ):
-        token_embeds = self.token_encoder(**token_encoder_inputs)
-        type_embeds = self.type_encoder(**type_encoder_inputs)
-        token_output = token_embeds.last_hidden_state
+        encoder_outputs = self.token_encoder(**token_encoder_inputs).last_hidden_state
+        token_hidden = encoder_outputs[:, labels["text_start_index"]:, :]
+        type_hidden = encoder_outputs[:, labels["label_token_subword_positions"], :]
 
-        if self.config.type_encoder_pooling == "mean":
-            if type_encoder_inputs["attention_mask"] is not None:
-                attention_mask_expanded = type_encoder_inputs["attention_mask"].unsqueeze(-1).expand(type_embeds.last_hidden_state.size()).float()
-                sum_embeddings = torch.sum(type_embeds.last_hidden_state * attention_mask_expanded, dim=1)
-                sum_mask = torch.clamp(attention_mask_expanded.sum(dim=1), min=1e-9)
-                type_output = sum_embeddings / sum_mask
-            else:
-                type_output = type_embeds.last_hidden_state.mean(dim=1)
-        else:
-            type_output = type_embeds.last_hidden_state[:, 0, :]
+        B, S, H = token_hidden.size()
+        _, C, _ = type_hidden.size()
 
-        B, S, H = token_output.size()
-        C, _ = type_output.size()
+        token_start_output = F.normalize(self.dropout(self.token_start_linear(token_hidden)), dim=-1)
+        token_end_output = F.normalize(self.dropout(self.token_end_linear(token_hidden)), dim=-1)
+        type_output = F.normalize(self.dropout(self.type_linear(type_hidden)), dim=-1)
 
-        token_start_output = F.normalize(self.dropout(self.token_start_linear(token_output)), dim=-1)
-        token_end_output = F.normalize(self.dropout(self.token_end_linear(token_output)), dim=-1)
-
-        type_output = F.normalize(self.dropout(self.type_linear(type_output)), dim=-1)
-
-        start_scores = self.start_logit_scale.exp() * torch.einsum("BSH,CH->BCS", token_start_output, type_output)
-        end_scores = self.end_logit_scale.exp() * torch.einsum("BSH,CH->BCS", token_end_output, type_output)
+        start_scores = self.start_logit_scale.exp() * torch.einsum("BSH,BCH->BCS", token_start_output, type_output)
+        end_scores = self.end_logit_scale.exp() * torch.einsum("BSH,BCH->BCS", token_end_output, type_output)
         
         span_width_embeddings = self.width_embedding(labels["span_lengths"])
-
         span_hidden = torch.cat(
             [
                 self.gather_spans(token_start_output, labels["span_subword_indices"][:, :, 0]),
@@ -106,16 +90,13 @@ class ContrastiveSpanModel(PreTrainedModel):
             dim=2
         )
 
-        token_span_output = F.normalize(
-            self.dropout(self.token_span_linear(span_hidden)), dim=-1
-        )
-
-        span_scores = self.span_logit_scale.exp() * torch.einsum("BSH,CH->BCS", token_span_output, type_output)
+        token_span_output = F.normalize(self.dropout(self.token_span_linear(span_hidden)), dim=-1)
+        span_scores = self.span_logit_scale.exp() * torch.einsum("BSH,BCH->BCS", token_span_output, type_output)
 
         if labels is not None and self.training:
-            flat_start_scores = start_scores.reshape(B * C, S) / self.config.contrastive_tau
-            flat_end_scores = end_scores.reshape(B * C, S) / self.config.contrastive_tau
-            flat_span_scores = span_scores.reshape(B * C, span_scores.size(-1)) / self.config.contrastive_tau
+            flat_start_scores = start_scores.reshape(B * C, S)
+            flat_end_scores = end_scores.reshape(B * C, S)
+            flat_span_scores = span_scores.reshape(B * C, span_scores.size(-1))
             start_negative_mask = labels["start_negative_mask"].reshape(B * C, S)
             end_negative_mask = labels["end_negative_mask"].reshape(B * C, S)
             span_negative_mask = labels["span_negative_mask"].reshape(B * C, span_scores.size(-1))
@@ -133,9 +114,9 @@ class ContrastiveSpanModel(PreTrainedModel):
             batch_indices, type_indices, start_indices, end_indices, span_indices = labels["ner_indices"]
             ner_start_mask, ner_end_mask, ner_span_mask = labels["ner_start_mask"], labels["ner_end_mask"], labels["ner_span_mask"]
 
-            start_loss = self.loss_fn(start_scores[batch_indices, type_indices] / self.config.contrastive_tau, start_indices, ner_start_mask)
-            end_loss = self.loss_fn(end_scores[batch_indices, type_indices] / self.config.contrastive_tau, end_indices, ner_end_mask)
-            span_loss = self.loss_fn(span_scores[batch_indices, type_indices] / self.config.contrastive_tau, span_indices, ner_span_mask)
+            start_loss = self.loss_fn(start_scores[batch_indices, type_indices], start_indices, ner_start_mask)
+            end_loss = self.loss_fn(end_scores[batch_indices, type_indices], end_indices, ner_end_mask)
+            span_loss = self.loss_fn(span_scores[batch_indices, type_indices], span_indices, ner_span_mask)
             
             loss = (
                 self.config.start_loss_weight * start_loss +
@@ -144,54 +125,58 @@ class ContrastiveSpanModel(PreTrainedModel):
             )
 
             total_loss = self.config.contrastive_threshold_loss_weight * threshold_loss + self.config.contrastive_span_loss_weight * loss
-
-            return SpanModelOutput(loss=total_loss, start_logits=start_scores, end_logits=end_scores, span_logits=span_scores)
+            return SpanModelOutput(loss=loss, start_logits=start_scores, end_logits=end_scores, span_logits=span_scores)
         else:
             return SpanModelOutput(start_logits=start_scores, end_logits=end_scores, span_logits=span_scores)
     
     def save_pretrained(self, path: str):
-        """Save model, tokenizer configs, and model state."""
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        
-        # Save config
+
+        # 1) Save config
         self.config.save_pretrained(str(path))
-        
-        # Save token and type encoder models
-        self.token_encoder.save_pretrained(str(path / "token_encoder"))
-        self.type_encoder.save_pretrained(str(path / "type_encoder"))
-        
-        # Save model state dict (span model specific weights)
-        torch.save(self.state_dict(), path / "model.pt")
-    
+
+        # 2) Save ALL model weights (including token_encoder)
+        torch.save(self.state_dict(), path / "model.bin")
+
     @classmethod
-    def from_pretrained(cls, path: str) -> "ContrastiveSpanModel":
-        """Load model from saved checkpoint."""
+    def from_pretrained(cls, path: str) -> "ContrastiveCrossEncoderModel":
         path = Path(path)
-        
+
+        # 1) Load config
         config = SpanModelConfig.from_pretrained(str(path))
-        
+
+        # 2) Init model (this builds token_encoder + heads, but not loaded yet)
         model = cls(config)
+
+        # 3) Load tokenizer to determine vocab size (tokenizer should be saved with the model)
+        vocab_size = None
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(str(path))
+            if hasattr(tokenizer, '__len__'):
+                vocab_size = len(tokenizer)
+            else:
+                vocab_size = len(tokenizer.vocab) if hasattr(tokenizer, 'vocab') else None
+        except Exception:
+            pass
         
-        token_config = AutoConfig.from_pretrained(model.config.token_encoder)
-        type_config = AutoConfig.from_pretrained(model.config.type_encoder)
-        if "mt5" in model.config.token_encoder:
-            model.token_encoder = MT5EncoderModel.from_pretrained(str(path / "token_encoder"), config=token_config)
-        else:
-            model.token_encoder = AutoModel.from_pretrained(str(path / "token_encoder"), config=token_config)
-        if "mt5" in model.config.type_encoder:
-            model.type_encoder = MT5EncoderModel.from_pretrained(str(path / "type_encoder"), config=type_config)
-        else:
-            model.type_encoder = AutoModel.from_pretrained(str(path / "type_encoder"), config=type_config)
-        state_dict = torch.load(path / "model.pt", map_location="cpu")
-        model_state_keys = set(model.state_dict().keys())
-        filtered_state_dict = {k: v for k, v in state_dict.items() 
-                              if k in model_state_keys}
-        model.load_state_dict(filtered_state_dict, strict=False)
+        state_dict = torch.load(path / "model.bin", map_location="cpu")
         
+        if vocab_size is None:
+            for key in state_dict.keys():
+                if 'token_encoder' in key and ('embedding' in key.lower() or 'shared' in key.lower()) and 'weight' in key:
+                    vocab_size = state_dict[key].shape[0]
+                    break
+        
+        if vocab_size is not None:
+            current_vocab_size = model.token_encoder.get_input_embeddings().weight.shape[0]
+            if vocab_size != current_vocab_size:
+                model.token_encoder.resize_token_embeddings(vocab_size)
+
+        model.load_state_dict(state_dict, strict=True)
+
         return model
 
     def gradient_checkpointing_enable(self):
         self.token_encoder.gradient_checkpointing_enable()
-        self.type_encoder.gradient_checkpointing_enable()
 

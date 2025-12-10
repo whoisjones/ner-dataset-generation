@@ -24,9 +24,9 @@ warnings.filterwarnings("ignore", category=FutureWarning, message=".*gamma.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
 os.environ["PYTHONWARNINGS"] = "ignore::FutureWarning"
 
-from src.model import SpanModel
+from src.model import CompressedBiEncoderModel 
 from src.config import SpanModelConfig
-from src.collator import InBatchDataCollator, AllLabelsDataCollator
+from src.collator import TrainCollatorCompressedBiEncoder, EvalCollatorCompressedBiEncoder
 from src.trainer import train, evaluate
 from src.logger import setup_logger
 from src.args import ModelArguments, DataTrainingArguments, CustomTrainingArguments
@@ -40,7 +40,7 @@ def main():
     os.makedirs(training_args.output_dir, exist_ok=True)
     
     torch.manual_seed(training_args.seed)
-    
+
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     
     accelerator = Accelerator(
@@ -74,7 +74,7 @@ def main():
         # Override max_span_length from data_args as it's data-dependent
         config.max_span_length = data_args.max_span_length
         # Load model from checkpoint
-        model = SpanModel.from_pretrained(model_args.model_checkpoint)
+        model = CompressedBiEncoderModel.from_pretrained(model_args.model_checkpoint)
         # Update model config
         model.config = config
     else:
@@ -102,14 +102,15 @@ def main():
             bce_span_pos_weight=model_args.bce_span_pos_weight,
             contrastive_threshold_loss_weight=model_args.contrastive_threshold_loss_weight,
             contrastive_span_loss_weight=model_args.contrastive_span_loss_weight,
+            contrastive_tau=model_args.contrastive_tau,
             type_encoder_pooling=model_args.type_encoder_pooling,
             prediction_threshold=model_args.prediction_threshold
         )
-        model = SpanModel(config=config)
+        model = CompressedBiEncoderModel(config=config)
 
     token_encoder_tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
     type_encoder_tokenizer = AutoTokenizer.from_pretrained(config.type_encoder)
-    in_batch_collator = InBatchDataCollator(
+    train_collator = TrainCollatorCompressedBiEncoder(
         token_encoder_tokenizer, 
         type_encoder_tokenizer, 
         max_seq_length=data_args.max_seq_length, 
@@ -124,7 +125,7 @@ def main():
             dataset["train"],
             batch_size=training_args.per_device_train_batch_size,
             shuffle=True,
-            collate_fn=in_batch_collator,
+            collate_fn=train_collator,
             num_workers=0
         )
 
@@ -140,7 +141,7 @@ def main():
             padding="longest" if len(validation_labels) <= 1000 else "max_length",
             return_tensors="pt"
         )
-        eval_collator = AllLabelsDataCollator(
+        eval_collator = EvalCollatorCompressedBiEncoder(
             token_encoder_tokenizer, 
             type_encodings=type_encodings,
             label2id=label2id,
@@ -168,7 +169,7 @@ def main():
             padding="longest" if len(test_labels) <= 1000 else "max_length",
             return_tensors="pt"
         )
-        test_collator = AllLabelsDataCollator(
+        test_collator = EvalCollatorCompressedBiEncoder(
             token_encoder_tokenizer, 
             type_encodings=type_encodings,
             label2id=label2id,
@@ -193,6 +194,7 @@ def main():
         scheduler_specific_kwargs=training_args.lr_scheduler_kwargs
     )
     
+    # Prepare model, optimizer, and dataloaders with accelerator
     if training_args.do_train:
         model, optimizer, train_dataloader = accelerator.prepare(model, optimizer, train_dataloader)
     if training_args.do_eval:
@@ -226,7 +228,7 @@ def main():
                 logger.info(f"\nLoading best model from checkpoint: {best_checkpoint_path}")
                 logger.info(f"Best validation F1: {best_f1:.4f}")
             # Load the best model
-            best_model = SpanModel.from_pretrained(str(best_checkpoint_path))
+            best_model = CompressedBiEncoderModel.from_pretrained(str(best_checkpoint_path))
             best_model.eval()
             best_model = accelerator.prepare(best_model)
             model = best_model

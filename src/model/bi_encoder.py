@@ -7,9 +7,9 @@ from pathlib import Path
 
 from .base import SpanModelOutput, mlp
 from ..config import SpanModelConfig
-from ..loss import BCELoss, FocalLoss, JGMakerLoss, TokenizationAwareLoss
+from ..loss import BCELoss, FocalLoss, TrueNegativeAvoidanceLoss, TokenizationAwareLoss
 
-class SpanModel(PreTrainedModel):
+class BiEncoderModel(PreTrainedModel):
     """Dual encoder with span marker module."""
 
     def __init__(self, config):
@@ -45,8 +45,8 @@ class SpanModel(PreTrainedModel):
 
         if config.loss_fn == "focal":
             self.loss_fn = FocalLoss(alpha=config.focal_alpha, gamma=config.focal_gamma)
-        elif config.loss_fn == "jgmaker":
-            self.loss_fn = JGMakerLoss(total_steps=3000)
+        elif config.loss_fn == "true_negative_avoidance":
+            self.loss_fn = TrueNegativeAvoidanceLoss(total_steps=10000)
         elif config.loss_fn == "bce":
             self.loss_fn = BCELoss()
         elif config.loss_fn == "tokenization_aware":
@@ -179,7 +179,7 @@ class SpanModel(PreTrainedModel):
         torch.save(self.state_dict(), path / "model.pt")
     
     @classmethod
-    def from_pretrained(cls, path: str) -> "SpanModel":
+    def from_pretrained(cls, path: str) -> "BiEncoderModel":
         """Load model from saved checkpoint."""
         path = Path(path)
         
