@@ -184,7 +184,47 @@ def main():
             num_workers=0
         )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=training_args.learning_rate)
+    # Set up optimizer with separate learning rates for different components if specified
+    if training_args.type_encoder_learning_rate is not None or training_args.linear_layers_learning_rate is not None:
+        token_encoder_params = list(model.token_encoder.parameters())
+        type_encoder_params = list(model.type_encoder.parameters())
+        linear_layers_params = [
+            p for name, p in model.named_parameters() 
+            if not name.startswith('token_encoder.') and not name.startswith('type_encoder.')
+        ]
+        
+        param_groups = []
+        param_groups.append({
+            'params': token_encoder_params, 
+            'lr': training_args.learning_rate
+        })
+        
+        if training_args.type_encoder_learning_rate is not None:
+            param_groups.append({
+                'params': type_encoder_params, 
+                'lr': training_args.type_encoder_learning_rate
+            })
+        else:
+            param_groups.append({
+                'params': type_encoder_params, 
+                'lr': training_args.learning_rate
+            })
+        
+        if training_args.linear_layers_learning_rate is not None:
+            param_groups.append({
+                'params': linear_layers_params, 
+                'lr': training_args.linear_layers_learning_rate
+            })
+        else:
+            param_groups.append({
+                'params': linear_layers_params, 
+                'lr': training_args.learning_rate
+            })
+        
+        optimizer = torch.optim.AdamW(param_groups)
+    else:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=training_args.learning_rate)
+    
     scheduler = get_scheduler(
         name=training_args.lr_scheduler_type,
         optimizer=optimizer,

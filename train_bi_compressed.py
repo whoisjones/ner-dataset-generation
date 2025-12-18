@@ -39,14 +39,9 @@ def main():
     model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[-1]))
     output_dir = training_args.output_dir
     os.makedirs(output_dir, exist_ok=True)
-
-    best_ckpt = Path(output_dir) / "best_checkpoint"
-    if best_ckpt.exists():
-        print(f"Best checkpoint already exists at {best_ckpt}. Exiting script.")
-        sys.exit(0)
     
     torch.manual_seed(training_args.seed)
-
+    
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     
     accelerator = Accelerator(
@@ -54,6 +49,15 @@ def main():
         gradient_accumulation_steps=getattr(training_args, 'gradient_accumulation_steps', 1),
         kwargs_handlers=[ddp_kwargs]
     )
+    
+    # Check for existing checkpoint after accelerator init (all processes check, but only main logs)
+    best_ckpt = Path(output_dir) / "best_checkpoint"
+    if best_ckpt.exists():
+        if accelerator.is_main_process:
+            logger = setup_logger(training_args.output_dir, is_main_process=True)
+            logger.info(f"Best checkpoint already exists at {best_ckpt}. Exiting script.")
+        # All processes exit to avoid hanging
+        sys.exit(0)
     
     logger = setup_logger(training_args.output_dir, is_main_process=accelerator.is_main_process)
     if accelerator.is_main_process:
@@ -191,7 +195,47 @@ def main():
             num_workers=0
         )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=training_args.learning_rate)
+    # Set up optimizer with separate learning rates for different components if specified
+    if training_args.type_encoder_learning_rate is not None or training_args.linear_layers_learning_rate is not None:
+        token_encoder_params = list(model.token_encoder.parameters())
+        type_encoder_params = list(model.type_encoder.parameters())
+        linear_layers_params = [
+            p for name, p in model.named_parameters() 
+            if not name.startswith('token_encoder.') and not name.startswith('type_encoder.')
+        ]
+        
+        param_groups = []
+        param_groups.append({
+            'params': token_encoder_params, 
+            'lr': training_args.learning_rate
+        })
+        
+        if training_args.type_encoder_learning_rate is not None:
+            param_groups.append({
+                'params': type_encoder_params, 
+                'lr': training_args.type_encoder_learning_rate
+            })
+        else:
+            param_groups.append({
+                'params': type_encoder_params, 
+                'lr': training_args.learning_rate
+            })
+        
+        if training_args.linear_layers_learning_rate is not None:
+            param_groups.append({
+                'params': linear_layers_params, 
+                'lr': training_args.linear_layers_learning_rate
+            })
+        else:
+            param_groups.append({
+                'params': linear_layers_params, 
+                'lr': training_args.learning_rate
+            })
+        
+        optimizer = torch.optim.AdamW(param_groups)
+    else:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=training_args.learning_rate)
+    
     scheduler = get_scheduler(
         name=training_args.lr_scheduler_type,
         optimizer=optimizer,
