@@ -12,9 +12,9 @@ class BCELoss(nn.Module):
             pos_weight=pos_weight
         )
         if mask is not None:
-            loss = (loss * mask).sum()
+            loss = (loss * mask).mean() * 100
         else:
-            loss = loss.sum()
+            loss = loss.mean() * 100
         return loss
 
 
@@ -38,9 +38,9 @@ class FocalLoss(nn.Module):
             loss = alpha_t * loss
 
         if mask is not None:
-            loss = (loss * mask).sum()
+            loss = (loss * mask).mean() * 100
         else:
-            loss = loss.sum()
+            loss = loss.mean() * 100
 
         return loss
 

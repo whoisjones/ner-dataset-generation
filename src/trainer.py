@@ -167,9 +167,13 @@ def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, accele
                     tokenizer.save_pretrained(checkpoint_dir / "tokenizer")
                 logger.info(f"Saved checkpoint to {checkpoint_dir}")
             
+            # Synchronize all processes after checkpoint save to ensure it's fully written
+            accelerator.wait_for_everyone()
+            
             current_f1 = eval_metrics['micro']['f1']
             if current_f1 > best_f1:
                 best_f1 = current_f1
+                # Set best_checkpoint_path on all processes after sync (checkpoint is guaranteed to exist)
                 best_checkpoint_path = checkpoint_dir
                 patience_counter = 0
                 if accelerator.is_main_process:
@@ -204,8 +208,15 @@ def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, accele
     
     progress_bar.close()
     
+    # Ensure all processes finish before creating symlink
+    accelerator.wait_for_everyone()
+    
     if best_checkpoint_path is not None and accelerator.is_main_process:
         best_checkpoint_link = Path(args.output_dir) / "best_checkpoint"
+        # Resolve paths to ensure correct relative path calculation
+        output_dir_resolved = Path(args.output_dir).resolve()
+        best_checkpoint_path_resolved = Path(best_checkpoint_path).resolve()
+        
         if best_checkpoint_link.exists():
             if best_checkpoint_link.is_symlink():
                 best_checkpoint_link.unlink()
@@ -213,9 +224,19 @@ def train(model, train_dataloader, eval_dataloader, optimizer, scheduler, accele
                 shutil.rmtree(best_checkpoint_link)
             else:
                 best_checkpoint_link.unlink()
-        best_checkpoint_link.symlink_to(best_checkpoint_path.relative_to(Path(args.output_dir)))
-        logger.info(f"Best checkpoint (F1={best_f1:.4f}) saved at: {best_checkpoint_path}")
-        logger.info(f"Symlink created: {best_checkpoint_link} -> {best_checkpoint_path.relative_to(Path(args.output_dir))}")
+        
+        # Create symlink using resolved relative path
+        try:
+            relative_path = best_checkpoint_path_resolved.relative_to(output_dir_resolved)
+            best_checkpoint_link.symlink_to(relative_path)
+            logger.info(f"Best checkpoint (F1={best_f1:.4f}) saved at: {best_checkpoint_path_resolved}")
+            logger.info(f"Symlink created: {best_checkpoint_link} -> {relative_path}")
+        except ValueError as e:
+            logger.error(f"Failed to create symlink: {e}. Best checkpoint path: {best_checkpoint_path_resolved}, Output dir: {output_dir_resolved}")
+            # Fallback: copy the checkpoint directory
+            if best_checkpoint_path_resolved.exists():
+                shutil.copytree(best_checkpoint_path_resolved, best_checkpoint_link, dirs_exist_ok=True)
+                logger.info(f"Copied best checkpoint to {best_checkpoint_link} as fallback")
     
     return global_step, best_checkpoint_path, best_f1
 

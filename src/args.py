@@ -198,3 +198,11 @@ class CustomTrainingArguments(TrainingArguments):
         default=5,
         metadata={"help": "Number of evaluation steps to wait before early stopping if no improvement."}
     )
+    type_encoder_learning_rate: Optional[float] = field(
+        default=None,
+        metadata={"help": "Learning rate for the type encoder. If None, uses the same learning rate as other parameters."}
+    )
+    linear_layers_learning_rate: Optional[float] = field(
+        default=None,
+        metadata={"help": "Learning rate for linear layers and other non-encoder parameters. If None, uses the same learning rate as other parameters."}
+    )
