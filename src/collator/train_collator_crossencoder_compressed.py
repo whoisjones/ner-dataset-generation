@@ -39,7 +39,7 @@ class TrainCollatorCompressedCrossEncoder:
             label_list = [tok for label in unique_types for tok in ('[LABEL]', label)] + ['[SEP]']
             label_offset = len(label_list)
             input_texts = [label_list + text for text in texts]
-        
+
         token_encodings = self.token_encoder_tokenizer(
             input_texts,
             padding=True,
@@ -52,6 +52,8 @@ class TrainCollatorCompressedCrossEncoder:
 
         if self.format == 'text':
             offset_mapping = token_encodings.pop("offset_mapping")
+        if label_offset > offset_mapping[0][-2][1]:
+            return {}
 
         label_token_subword_positions = [i for i, input_id in enumerate(token_encodings['input_ids'][0]) if input_id == self.token_encoder_tokenizer.convert_tokens_to_ids("[LABEL]")]
 
