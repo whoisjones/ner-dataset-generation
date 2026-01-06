@@ -1,4 +1,4 @@
-# NER Dataset Generation
+# 🦦 Otter
 
 ## Training
 
