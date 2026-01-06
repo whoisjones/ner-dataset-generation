@@ -39,12 +39,8 @@ class CrossEncoderModel(PreTrainedModel):
 
         if config.loss_fn == "focal":
             self.loss_fn = FocalLoss(alpha=config.focal_alpha, gamma=config.focal_gamma)
-        elif config.loss_fn == "true_negative_avoidance":
-            self.loss_fn = TrueNegativeAvoidanceLoss(total_steps=10000)
         elif config.loss_fn == "bce":
             self.loss_fn = BCELoss()
-        elif config.loss_fn == "tokenization_aware":
-            self.loss_fn = TokenizationAwareLoss()
         else:
             raise ValueError(f"Invalid loss function: {config.loss_fn}")
 
