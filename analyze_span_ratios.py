@@ -150,7 +150,7 @@ def main():
                    loc='best',
                    ncol=1,
                    frameon=True,
-                   fontsize=10)
+                   fontsize=12)
     
     plt.tight_layout(pad=1.5, h_pad=1.0, w_pad=1.0)
     

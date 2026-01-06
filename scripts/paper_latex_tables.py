@@ -66,69 +66,103 @@ EXPERIMENTS = [
 ]
 
 def plot_thresholds(df):
-    # first, we need to figure out scores for each threshold
-    # exclude translated evaluation dirs
     df_thresholds = df[~df['evaluation_dir'].str.contains('translated')]
-    df_thresholds = df_thresholds[df_thresholds['evaluation_dir'].isin(['panx', 'masakhaner', 'multinerd', 'dynamicner', 'uner'])]
-    # Create an 'architecture' column by extracting 'ce' or 'bi' from the experiment name
-    df_thresholds['architecture'] = df_thresholds['experiment'].str.extract(r'^(ce|bi)_')
-    # Now group by architecture and threshold to get aggregated stats per architecture
-    df_thresholds_stats = df_thresholds.groupby(['architecture', 'threshold']).agg(
-        micro_f1_mean=('micro_f1', 'mean'),
-        macro_f1_mean=('macro_f1', 'mean'),
-    ).reset_index()
-
-    plt.figure(figsize=(3.5, 2.5))
-
-    arch_map = {
-        "bi": "Bi-Encoder",
-        "ce": "Cross-Encoder",
-    }
-
-    color_map = {
-        "bi": "tab:orange",
-        "ce": "tab:blue",
-    }
-
-    for arch_key, arch_name in arch_map.items():
-        subset = df_thresholds_stats[
-            df_thresholds_stats["architecture"] == arch_key
-        ].sort_values("threshold")
-
-        plt.plot(
-            subset["threshold"],
-            subset["micro_f1_mean"],
-            marker="o",
-            color=color_map[arch_key],
-            label=arch_name,
-        )
-
-    plt.xlabel("Threshold")
-    plt.ylabel("Micro F1")
-    plt.legend(loc="best", frameon=False)
-
-    plt.tight_layout()
-    plt.savefig("thresholds_micro_f1.png", dpi=300)
-
-def architecture_ablation(df):
-    df_agg = df[~df['evaluation_dir'].str.contains('translated')]
-    df_agg = df_agg.groupby(['experiment']).agg({
+    df_thresholds = df_thresholds[df_thresholds['experiment'].str.contains('pilener')]
+    df_thresholds = df_thresholds.groupby(['experiment', 'evaluation_dir', 'threshold']).agg({
         'micro_f1': 'mean',
     }).reset_index()
-    df_agg = df_agg[df_agg["experiment"].str.contains('pilener')]
+    df_thresholds = df_thresholds.groupby(['experiment', 'threshold']).agg({
+        'micro_f1': 'mean',
+    }).reset_index()
+    df_thresholds['architecture'] = df_thresholds['experiment'].str.extract(r'^(ce|bi)_')
+    df_thresholds['backbone'] = df_thresholds['experiment'].str.extract(r'_(rembert|mdeberta|xlmr|mmbert|mt5)_')
+    df_thresholds = df_thresholds.groupby(['architecture', 'threshold']).agg({
+        'micro_f1': 'mean',
+    }).reset_index()
+
+    fig, axes = plt.subplots(1, 2, figsize=(6, 2.3), sharey=True)
+
+    arch_order = [("bi", "Bi-Encoder"), ("ce", "Cross-Encoder")]
+    backbone_map = {
+        "rembert": "RemBERT",
+        "mdeberta": "mDeBERTa",
+        "xlmr": "XLM-R",
+        "mmbert": "mmBERT",
+        "mt5": "mT5",
+    }
+
+    for ax, (arch_key, arch_name) in zip(axes, arch_order):
+        for backbone_key, bb_name in backbone_map.items():
+            subset = (
+                df_thresholds[
+                    (df_thresholds["architecture"] == arch_key)
+                    & (df_thresholds["backbone"] == backbone_key)
+                ]
+                .sort_values("threshold")
+            )
+            if subset.empty:
+                continue
+
+            ax.plot(subset["threshold"], subset["micro_f1"], marker="o", linewidth=1.2, markersize=3, label=bb_name)
+
+            best_idx = subset["micro_f1"].idxmax()
+            ax.scatter(
+                [subset.loc[best_idx, "threshold"]],
+                [subset.loc[best_idx, "micro_f1"]],
+                marker="D",
+                s=28,
+                edgecolors="black",
+                linewidths=0.4,
+            )
+
+        ax.set_title(arch_name, fontsize=10)
+        ax.set_xlabel("Threshold", fontsize=10)
+        if ax == axes[0]:
+            ax.legend(frameon=False, fontsize=6, loc="best")
+
+    axes[0].set_ylabel("Macro-F1", fontsize=10)
+    fig.tight_layout()
+    fig.savefig("thresholds_micro_f1.png", dpi=300)
+    plt.close(fig)
+
+def architecture_ablation(df):
+    df_agg = df.copy(deep=True)
+    df_agg = df_agg[~df_agg['evaluation_dir'].str.contains('translated')]
+    df_agg = df_agg[df_agg['experiment'].str.contains('pilener')]
+    df_agg = df_agg.groupby(['experiment', 'evaluation_dir', 'threshold']).agg({
+        'micro_f1': 'mean',
+    }).reset_index()
+    df_agg = df_agg.groupby(['experiment', 'threshold']).agg({
+        'micro_f1': 'mean',
+    }).reset_index()
     df_agg['architecture'] = df_agg['experiment'].str.extract(r'^(ce|bi)_')
     df_agg['backbone'] = df_agg['experiment'].str.extract(r'_(rembert|mdeberta|xlmr|mmbert|mt5)_')
 
+    # select max micro f1 per architecture, backbone
+    df_agg = df_agg.groupby(['architecture', 'backbone']).agg({
+        'micro_f1': 'max',
+    }).reset_index()
     df_agg = df_agg.pivot(index='architecture', columns='backbone', values='micro_f1')
+    #add mean column
+    df_agg['avg'] = df_agg.mean(axis=1)
+    # add mean row for each backbone
+    df_agg.loc["avg"] = df_agg.mean(axis=0)
     df_agg = df_agg.applymap(lambda x: f"{x:.3f}" if pd.notnull(x) else "")
     print(df_agg.to_latex())
 
 def dataset_ablation(df):
     df_agg = df[~df['evaluation_dir'].str.contains('translated')]
-    df_agg = df_agg.groupby(['experiment']).agg({
+    df_agg = df_agg[
+        ((df_agg['experiment'].str.startswith('bi_')) & (df_agg['threshold'] == 0.2)) |
+        ((~df_agg['experiment'].str.startswith('bi_')) & (df_agg['threshold'] == 0.15))
+    ]
+    df_agg = df_agg.groupby(['experiment', 'evaluation_dir']).agg({
         'micro_f1': 'mean',
     }).reset_index()
-    df_agg = df_agg[df_agg["experiment"].isin(['bi_mmbert_finerweb', 'bi_mmbert_euroglinerx', 'bi_mmbert_pilener', 'ce_xlmr_finerweb', 'ce_xlmr_euroglinerx', 'ce_xlmr_pilener'])]
+    df_agg = df_agg.groupby('experiment').agg({
+        'micro_f1': 'mean',
+    }).reset_index()
+    df_agg = df_agg[df_agg["experiment"].isin(['bi_rembert_finerweb', 'bi_rembert_euroglinerx', 'bi_rembert_pilener', 'ce_xlmr_finerweb', 'ce_xlmr_euroglinerx', 'ce_xlmr_pilener'])]
     df_agg['architecture'] = df_agg['experiment'].str.extract(r'^(ce|bi)_')
     df_agg['backbone'] = df_agg['experiment'].str.extract(r'_(rembert|mdeberta|xlmr|mmbert|mt5)_')
     df_agg['dataset'] = df_agg['experiment'].str.extract(r'_(finerweb|euroglinerx|pilener)')
@@ -139,8 +173,15 @@ def dataset_ablation(df):
 
 def dataset_ablation_translated(df):
     df_agg = df.copy(deep=True)
+    df_agg = df_agg[
+        ((df_agg['experiment'].str.startswith('bi_')) & (df_agg['threshold'] == 0.2)) |
+        ((~df_agg['experiment'].str.startswith('bi_')) & (df_agg['threshold'] == 0.15))
+    ]
     df_agg['is_eval_translated'] = df['evaluation_dir'].str.contains('translated')
-    df_agg = df_agg[df_agg["experiment"].isin(['bi_mmbert_finerweb', 'bi_mmbert_finerweb-translated', 'ce_xlmr_finerweb', 'ce_xlmr_finerweb-translated'])]
+    df_agg = df_agg[df_agg["experiment"].isin(['bi_rembert_finerweb', 'bi_rembert_finerweb-translated', 'ce_xlmr_finerweb', 'ce_xlmr_finerweb-translated'])]
+    df_agg = df_agg.groupby(['experiment', 'evaluation_dir', "is_eval_translated"]).agg({
+        'micro_f1': 'mean',
+    }).reset_index()
     df_agg = df_agg.groupby(['experiment', 'is_eval_translated']).agg({
         'micro_f1': 'mean',
     }).reset_index()
@@ -167,6 +208,8 @@ def main():
                     "micro_f1": data["test_metrics"]["micro"]["f1"],
                     "macro_f1": data["test_metrics"]["macro"]["f1"],
                 })
+
+    
     df = pd.DataFrame(rows)
     df["threshold"] = (
         df["threshold"]
@@ -174,10 +217,15 @@ def main():
         .str.replace(".json", "", regex=False)
         .astype(float)
     )
-    df = df[df['threshold'] == 0.1]
 
     architecture_ablation(df)
-    dataset_ablation(df)
+    df = df.groupby(['experiment', 'threshold']).agg({
+        'micro_f1': 'mean',
+    }).reset_index()
+
+    #sort by micro_f1 mean
+    df = df.sort_values(by='micro_f1', ascending=False)
+    print(df.to_latex())
 
 if __name__ == "__main__":
     main()

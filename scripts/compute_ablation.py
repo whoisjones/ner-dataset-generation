@@ -551,15 +551,19 @@ def paper_results():
         if architecture == "cross_encoder":
             flops = [results[str(k)]["flops"]['mean'] for k in xs]
         elif architecture == "bi_encoder":
-            flops = [results[str(k)]["flops"]['mean'] + results[str(k)]["type_encoder_flops"]['mean'] for k in xs]
+            flops = [results[str(k)]["flops"]['mean'] for k in xs]
+            tflops = [results[str(k)]["type_encoder_flops"]['mean'] / 1000 for k in xs]
+            total_beflops = [results[str(k)]["flops"]['mean'] + results[str(k)]["type_encoder_flops"]['mean'] for k in xs]
         else:
             raise ValueError(f"Invalid architecture: {architecture}")
+        if architecture == "bi_encoder":
+            return xs, f1s, lat_ms, flops, tflops, total_beflops
         return xs, f1s, lat_ms, flops
 
     ce_x, ce_f1, ce_lat, ce_flops = extract(cross_encoder_results, "cross_encoder")
-    be_x, be_f1, be_lat, be_flops = extract(bi_encoder_results, "bi_encoder")
+    be_x, be_f1, be_lat, be_flops, be_tflops, be_total_flops = extract(bi_encoder_results, "bi_encoder")
 
-    fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(3, 5), sharex=True)
+    fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(3, 4.5), sharex=True)
 
     ce_color = "tab:blue"
     be_color = "tab:orange"
@@ -570,16 +574,31 @@ def paper_results():
     axes[0].set_ylabel("Micro F1")
 
     # 2) Latency
-    axes[1].plot(ce_x, ce_lat, color=ce_color, marker="o")
-    axes[1].plot(be_x, be_lat, color=be_color, marker="o")
+    axes[1].plot(ce_x, ce_lat, color=ce_color, marker="o", label="Cross-Encoder")
+    axes[1].plot(be_x, be_lat, color=be_color, marker="o", label="Bi-Encoder")
+    # Add "Bi-Encoder (inference)" to the legend without plotting
+    handles, labels = axes[1].get_legend_handles_labels()
+    from matplotlib.lines import Line2D
+    inference_handle = Line2D([0], [0], color=be_color, marker='o', linestyle=':', label='Bi-Encoder (inference)')
+    handles.append(inference_handle)
+    labels.append('Bi-Encoder (inference)')
+    axes[1].legend(handles, labels, loc="best", frameon=False, fontsize=8)
     axes[1].set_ylabel("Latency (ms)")
 
     # 3) FLOPs
-    axes[2].plot(ce_x, ce_flops, color=ce_color, marker="o", label="Cross-Encoder")
-    axes[2].plot(be_x, be_flops, color=be_color, marker="o", label="Bi-Encoder")
+    axes[2].plot(ce_x, ce_flops, color=ce_color, marker="o",)
+    axes[2].plot(be_x, be_total_flops, color=be_color, marker="o", label="Bi-Encoder")
+    axes[2].plot(be_x, [x + y for x, y in zip(be_flops, be_tflops)], color=be_color, marker="o", linestyle=":")
     axes[2].set_ylabel("FLOPs")
     axes[2].set_xlabel("Label set size")
-    axes[2].legend(loc="best", frameon=False)
+    # Set tight y-limits based on actual data to make the plot more readable
+    all_flops = ce_flops + [x + y for x, y in zip(be_flops, be_tflops)] + be_total_flops
+    ymin = min(all_flops) * 0.8
+    ymax = max(all_flops) * 1.2
+    axes[2].set_ylim([ymin, ymax])
+    axes[2].set_yscale("log")
+    axes[2].set_yticks([1e9, 1e10, 1e11])
+    axes[2].set_yticklabels([r"$10^9$", r"$10^{10}$", r"$10^{11}$"])
 
     # x log scale for all
     for ax in axes:

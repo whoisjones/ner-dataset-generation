@@ -1,8 +1,10 @@
 import glob
 import os
 from datasets import DatasetDict
+from src.paths import get_paths
 
-NEW_EVAL_DATA_DIR = "/vol/tmp/goldejon/ner/eval_data"
+paths = get_paths()
+NEW_EVAL_DATA_DIR = paths.eval_data_dir
 
 def convert_batch(batch):
     # batch is a dict of lists: batch["token_spans"][i] is the list for sample i
@@ -22,7 +24,7 @@ def convert_batch(batch):
     return batch
 
 def main():
-    for file in glob.glob("/vol/tmp/goldejon/multilingual_ner/data/evaluation/*"):
+    for file in glob.glob(str(paths.multilingual_ner_evaluation_dir / "*")):
         for language_dataset in glob.glob(file + "/*"):
             output_path = os.path.join(NEW_EVAL_DATA_DIR, language_dataset.split("/")[-2], language_dataset.split("/")[-1])
             os.makedirs(output_path, exist_ok=True)
