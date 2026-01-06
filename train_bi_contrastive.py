@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Main training script for Dual Encoder NER model.
-Run from project root: python train.py --config configs/default.json
-"""
-
 import os
 import sys
 import json
@@ -184,7 +178,6 @@ def main():
             num_workers=0
         )
 
-    # Set up optimizer with separate learning rates for different components if specified
     if training_args.type_encoder_learning_rate is not None or training_args.linear_layers_learning_rate is not None:
         token_encoder_params = list(model.token_encoder.parameters())
         type_encoder_params = list(model.type_encoder.parameters())
@@ -233,7 +226,6 @@ def main():
         scheduler_specific_kwargs=training_args.lr_scheduler_kwargs
     )
     
-    # Prepare model, optimizer, and dataloaders with accelerator
     if training_args.do_train:
         model, optimizer, train_dataloader = accelerator.prepare(model, optimizer, train_dataloader)
     if training_args.do_eval:
@@ -261,12 +253,10 @@ def main():
         if accelerator.is_main_process:
             logger.info(f"\nTraining complete! Completed {final_step} steps.")
         
-        # Load best model for evaluation
         if best_checkpoint_path is not None and training_args.do_eval:
             if accelerator.is_main_process:
                 logger.info(f"\nLoading best model from checkpoint: {best_checkpoint_path}")
                 logger.info(f"Best validation F1: {best_f1:.4f}")
-            # Load the best model
             best_model = ContrastiveBiEncoderModel.from_pretrained(str(best_checkpoint_path))
             best_model.eval()
             best_model = accelerator.prepare(best_model)
@@ -276,7 +266,6 @@ def main():
                 logger.info("Using latest model for evaluation (no validation was performed during training).")
             model.eval()
         
-        # Final evaluation on test set
         if accelerator.is_main_process:
             logger.info("\n" + "=" * 60)
             logger.info("Final Test Set Evaluation")
@@ -290,7 +279,6 @@ def main():
             logger.info(f"Test F1 Score: {test_metrics['micro']['f1']:.4f}")
             logger.info("=" * 60)
         
-        # Save test results to file (only on main process)
         if accelerator.is_main_process:
             test_results_path = Path(training_args.output_dir) / "test_results.json"
             with open(test_results_path, 'w') as f:

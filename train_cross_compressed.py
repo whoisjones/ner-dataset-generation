@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Main training script for Dual Encoder NER model.
-Run from project root: python train.py --config configs/default.json
-"""
-
 import os
 import sys
 import json
@@ -50,13 +44,11 @@ def main():
         kwargs_handlers=[ddp_kwargs]
     )
     
-    # Check for existing checkpoint after accelerator init (all processes check, but only main logs)
     best_ckpt = Path(output_dir) / "best_checkpoint"
     if best_ckpt.exists():
         if accelerator.is_main_process:
             logger = setup_logger(training_args.output_dir, is_main_process=True)
             logger.info(f"Best checkpoint already exists at {best_ckpt}. Exiting script.")
-        # All processes exit to avoid hanging
         sys.exit(0)
     
     logger = setup_logger(training_args.output_dir, is_main_process=accelerator.is_main_process)
@@ -75,26 +67,19 @@ def main():
         data_files["test"] = data_args.test_file
     dataset = load_dataset('json', data_files=data_files)
 
-    # Load model from checkpoint if provided, otherwise initialize from scratch
     if model_args.model_checkpoint is not None:
         if accelerator.is_main_process:
             logger.info(f"Loading model from checkpoint: {model_args.model_checkpoint}")
-        # Load config from checkpoint
         config = SpanModelConfig.from_pretrained(model_args.model_checkpoint)
-        # Override max_span_length from data_args as it's data-dependent
         config.max_span_length = data_args.max_span_length
-        # Load model from checkpoint
         model = CompressedCrossEncoderModel.from_pretrained(model_args.model_checkpoint)
-        # Update model config
         model.config = config
-        # Load tokenizer from checkpoint (or base model if not found)
         try:
             tokenizer = AutoTokenizer.from_pretrained(model_args.model_checkpoint)
         except Exception:
             tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
             tokenizer.add_tokens(["[LABEL]"], special_tokens=True)
     else:
-        # Validate that token_encoder and type_encoder are provided
         if model_args.token_encoder is None or model_args.type_encoder is None:
             raise ValueError(
                 "Either 'model_checkpoint' must be provided, or both 'token_encoder' and 'type_encoder' must be provided."
@@ -237,12 +222,10 @@ def main():
         if accelerator.is_main_process:
             logger.info(f"\nTraining complete! Completed {final_step} steps.")
         
-        # Load best model for evaluation
         if best_checkpoint_path is not None and training_args.do_eval:
             if accelerator.is_main_process:
                 logger.info(f"\nLoading best model from checkpoint: {best_checkpoint_path}")
                 logger.info(f"Best validation F1: {best_f1:.4f}")
-            # Load the best model
             best_model = CompressedCrossEncoderModel.from_pretrained(str(best_checkpoint_path))
             best_model.eval()
             best_model = accelerator.prepare(best_model)
@@ -252,7 +235,6 @@ def main():
                 logger.info("Using latest model for evaluation (no validation was performed during training).")
             model.eval()
         
-        # Final evaluation on test set
         if accelerator.is_main_process:
             logger.info("\n" + "=" * 60)
             logger.info("Final Test Set Evaluation")
@@ -266,7 +248,6 @@ def main():
             logger.info(f"Test F1 Score: {test_metrics['micro']['f1']:.4f}")
             logger.info("=" * 60)
         
-        # Save test results to file (only on main process)
         if accelerator.is_main_process:
             test_results_path = Path(training_args.output_dir) / "test_results.json"
             with open(test_results_path, 'w') as f:
