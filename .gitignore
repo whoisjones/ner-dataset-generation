@@ -10,6 +10,7 @@ results/*
 ablations/*
 artifacts/*
 eval_*
+scripts/
 
 # Distribution / packaging
 .Python
