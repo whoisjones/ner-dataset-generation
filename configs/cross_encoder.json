@@ -1,22 +1,22 @@
 {
-    "run_name": "bi-encoder",
+    "run_name": "cross-encoder",
     "token_encoder": "google-bert/bert-base-uncased",
-    "type_encoder": "google-bert/bert-base-uncased",
-    "dataset_name": "finerweb",
+    "type_encoder": "none",
+    "dataset_name": "conll2003",
     "annotation_format": "tokens",
     "loss_masking": "subwords",
     "train_file": "data/conll2003/train.jsonl",
     "validation_file": "data/conll2003/validation.jsonl",
     "test_file": "data/conll2003/test.jsonl",
-    "output_dir": "models/bi_encoder",
+    "output_dir": "models/cross_encoder",
     "per_device_train_batch_size": 8,
     "per_device_eval_batch_size": 8,
-    "type_encoder_pooling": "cls",
+    "type_encoder_pooling": null,
     "learning_rate": 3e-05,
     "type_encoder_learning_rate": null,
     "linear_layers_learning_rate": null,
-    "max_steps": 500,
-    "eval_steps": 500,
+    "max_steps": 1000,
+    "eval_steps": 1000,
     "logging_steps": 20,
     "warmup_steps": 100,
     "loss_fn": "bce",
@@ -47,5 +47,4 @@
     "do_train": true,
     "do_eval": true,
     "do_predict": true
-  }
-  
+}

@@ -1,5 +1,3 @@
-import torch
-
 def all_spans_mask(input_ids, sequence_ids, max_span_length):
     text_start_index = 0
     while sequence_ids[text_start_index] == None:

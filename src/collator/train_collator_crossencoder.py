@@ -2,7 +2,7 @@ import random
 import torch
 from .masks import compressed_all_spans_mask_cross_encoder, compressed_subwords_mask_cross_encoder
 
-class TrainCollatorCompressedCrossEncoder:
+class TrainCollatorCrossEncoder:
     def __init__(self, token_encoder_tokenizer, max_seq_length=512, max_span_length=30, format='text', loss_masking='none'):
         self.token_encoder_tokenizer = token_encoder_tokenizer
         self.max_seq_length = max_seq_length
@@ -14,9 +14,9 @@ class TrainCollatorCompressedCrossEncoder:
 
     def __call__(self, batch):
         if self.format == 'text':
-            texts = [sample['text'] for sample in batch if len(sample['text']) > 2]
+            texts = [sample['text'] for sample in batch if len(sample['text'])]
         elif self.format == 'tokens':
-            texts = [sample["tokens"] for sample in batch if len(sample["tokens"]) > 2]
+            texts = [sample["tokens"] for sample in batch if len(sample["tokens"])]
         else:
             raise ValueError(f"Invalid format: {self.format}")
 
@@ -52,8 +52,8 @@ class TrainCollatorCompressedCrossEncoder:
 
         if self.format == 'text':
             offset_mapping = token_encodings.pop("offset_mapping")
-        if label_offset > offset_mapping[0][-2][1]:
-            return {}
+            if label_offset > offset_mapping[0][-2][1]:
+                return {}
 
         label_token_subword_positions = [i for i, input_id in enumerate(token_encodings['input_ids'][0]) if input_id == self.token_encoder_tokenizer.convert_tokens_to_ids("[LABEL]")]
 

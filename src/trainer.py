@@ -4,7 +4,7 @@ from pathlib import Path
 from collections import defaultdict
 
 import shutil
-from .metrics import compute_span_predictions, compute_compressed_span_predictions, add_batch_metrics, finalize_metrics
+from .metrics import compute_span_predictions, add_batch_metrics, finalize_metrics
 from .logger import setup_logger
 
 
@@ -44,23 +44,13 @@ def evaluate(model, dataloader, accelerator):
                 num_batches += 1
 
             golds = batch['labels']['ner']
-            if len(output.span_logits.shape) == 4:
-                predictions = compute_span_predictions(
-                    span_logits=output.span_logits.cpu().numpy(),
-                    start_mask=batch["labels"]["valid_start_mask"].cpu().numpy(),
-                    end_mask=batch["labels"]["valid_end_mask"].cpu().numpy(),
-                    max_span_width=unwrapped_model.config.max_span_length,
-                    id2label=batch["id2label"],
-                    threshold=unwrapped_model.config.prediction_threshold
-                )
-            else:
-                predictions = compute_compressed_span_predictions(
-                    span_logits=output.span_logits.cpu().numpy(),
-                    span_mask=batch["labels"]["valid_span_mask"].cpu().numpy(),
-                    span_mapping=batch["labels"]["span_subword_indices"].cpu().numpy(),
-                    id2label=batch["id2label"],
-                    threshold=unwrapped_model.config.prediction_threshold
-                )
+            predictions = compute_span_predictions(
+                span_logits=output.span_logits.cpu().numpy(),
+                span_mask=batch["labels"]["valid_span_mask"].cpu().numpy(),
+                span_mapping=batch["labels"]["span_subword_indices"].cpu().numpy(),
+                id2label=batch["id2label"],
+                threshold=unwrapped_model.config.prediction_threshold
+            )
             add_batch_metrics(golds, predictions, metrics_by_type)
             
             pbar.update(1)

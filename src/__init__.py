@@ -1,10 +1,8 @@
-from .model import BiEncoderModel, CompressedBiEncoderModel, ContrastiveBiEncoderModel, ContrastiveCrossEncoderModel, CompressedCrossEncoderModel
+from .model import BiEncoderModel, CrossEncoderModel, ContrastiveBiEncoderModel, ContrastiveCrossEncoderModel
 from .collator import (
-    TrainCollatorBiEncoder, EvalCollatorBiEncoder, TrainCollatorCompressedBiEncoder, EvalCollatorCompressedBiEncoder, 
-    TrainCollatorContrastiveBiEncoder, EvalCollatorContrastiveBiEncoder, TrainCollatorCompressedCrossEncoder, EvalCollatorCompressedCrossEncoder
+    TrainCollatorBiEncoder, EvalCollatorBiEncoder, TrainCollatorCrossEncoder, EvalCollatorCrossEncoder, TrainCollatorContrastiveBiEncoder, EvalCollatorContrastiveBiEncoder, TrainCollatorContrastiveCrossEncoder, EvalCollatorContrastiveCrossEncoder
 )
 from .metrics import compute_span_predictions, add_batch_metrics, finalize_metrics
-from .data import transform_bio_to_span, prepare_dataset
 from .trainer import train, evaluate
 from .config import SpanModelConfig
 from .logger import setup_logger
@@ -18,17 +16,15 @@ __all__ = [
     "SpanModelConfig",
     "TrainCollatorBiEncoder",
     "EvalCollatorBiEncoder",
-    "TrainCollatorCompressedBiEncoder",
-    "EvalCollatorCompressedBiEncoder",
+    "TrainCollatorCrossEncoder",
+    "EvalCollatorCrossEncoder",
     "TrainCollatorContrastiveBiEncoder",
     "EvalCollatorContrastiveBiEncoder",
-    "TrainCollatorCompressedCrossEncoder",
-    "EvalCollatorCompressedCrossEncoder",
+    "TrainCollatorContrastiveCrossEncoder",
+    "EvalCollatorContrastiveCrossEncoder",
     "compute_span_predictions",
     "add_batch_metrics",
     "finalize_metrics",
-    "transform_bio_to_span",
-    "prepare_dataset",
     "train",
     "evaluate",
     "setup_logger",

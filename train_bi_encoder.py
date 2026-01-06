@@ -18,9 +18,9 @@ warnings.filterwarnings("ignore", category=FutureWarning, message=".*gamma.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
 os.environ["PYTHONWARNINGS"] = "ignore::FutureWarning"
 
-from src.model import CompressedBiEncoderModel 
+from src.model import BiEncoderModel 
 from src.config import SpanModelConfig
-from src.collator import TrainCollatorCompressedBiEncoder, EvalCollatorCompressedBiEncoder
+from src.collator import TrainCollatorBiEncoder, EvalCollatorBiEncoder
 from src.trainer import train, evaluate
 from src.logger import setup_logger
 from src.args import ModelArguments, DataTrainingArguments, CustomTrainingArguments
@@ -72,7 +72,7 @@ def main():
             logger.info(f"Loading model from checkpoint: {model_args.model_checkpoint}")
         config = SpanModelConfig.from_pretrained(model_args.model_checkpoint)
         config.max_span_length = data_args.max_span_length
-        model = CompressedBiEncoderModel.from_pretrained(model_args.model_checkpoint)
+        model = BiEncoderModel.from_pretrained(model_args.model_checkpoint)
         model.config = config
     else:
         if model_args.token_encoder is None or model_args.type_encoder is None:
@@ -102,11 +102,11 @@ def main():
             type_encoder_pooling=model_args.type_encoder_pooling,
             prediction_threshold=model_args.prediction_threshold
         )
-        model = CompressedBiEncoderModel(config=config)
+        model = BiEncoderModel(config=config)
 
     token_encoder_tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
     type_encoder_tokenizer = AutoTokenizer.from_pretrained(config.type_encoder)
-    train_collator = TrainCollatorCompressedBiEncoder(
+    train_collator = TrainCollatorBiEncoder(
         token_encoder_tokenizer, 
         type_encoder_tokenizer, 
         max_seq_length=data_args.max_seq_length, 
@@ -137,7 +137,7 @@ def main():
             padding="longest" if len(validation_labels) <= 1000 else "max_length",
             return_tensors="pt"
         )
-        eval_collator = EvalCollatorCompressedBiEncoder(
+        eval_collator = EvalCollatorBiEncoder(
             token_encoder_tokenizer, 
             type_encodings=type_encodings,
             label2id=label2id,
@@ -165,7 +165,7 @@ def main():
             padding="longest" if len(test_labels) <= 1000 else "max_length",
             return_tensors="pt"
         )
-        test_collator = EvalCollatorCompressedBiEncoder(
+        test_collator = EvalCollatorBiEncoder(
             token_encoder_tokenizer, 
             type_encodings=type_encodings,
             label2id=label2id,
@@ -260,7 +260,7 @@ def main():
             if accelerator.is_main_process:
                 logger.info(f"\nLoading best model from checkpoint: {best_checkpoint_path}")
                 logger.info(f"Best validation F1: {best_f1:.4f}")
-            best_model = CompressedBiEncoderModel.from_pretrained(str(best_checkpoint_path))
+            best_model = BiEncoderModel.from_pretrained(str(best_checkpoint_path))
             best_model.eval()
             best_model = accelerator.prepare(best_model)
             model = best_model

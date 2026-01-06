@@ -18,9 +18,9 @@ warnings.filterwarnings("ignore", category=FutureWarning, message=".*gamma.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
 os.environ["PYTHONWARNINGS"] = "ignore::FutureWarning"
 
-from src.model import CompressedCrossEncoderModel
+from src.model import CrossEncoderModel
 from src.config import SpanModelConfig
-from src.collator import TrainCollatorCompressedCrossEncoder, EvalCollatorCompressedCrossEncoder
+from src.collator import TrainCollatorCrossEncoder, EvalCollatorCrossEncoder
 from src.trainer import train, evaluate
 from src.logger import setup_logger
 from src.args import ModelArguments, DataTrainingArguments, CustomTrainingArguments
@@ -72,7 +72,7 @@ def main():
             logger.info(f"Loading model from checkpoint: {model_args.model_checkpoint}")
         config = SpanModelConfig.from_pretrained(model_args.model_checkpoint)
         config.max_span_length = data_args.max_span_length
-        model = CompressedCrossEncoderModel.from_pretrained(model_args.model_checkpoint)
+        model = CrossEncoderModel.from_pretrained(model_args.model_checkpoint)
         model.config = config
         try:
             tokenizer = AutoTokenizer.from_pretrained(model_args.model_checkpoint)
@@ -109,10 +109,10 @@ def main():
         )
         tokenizer = AutoTokenizer.from_pretrained(config.token_encoder)
         tokenizer.add_tokens(["[LABEL]"], special_tokens=True)
-        model = CompressedCrossEncoderModel(config=config)
+        model = CrossEncoderModel(config=config)
         model.token_encoder.resize_token_embeddings(len(tokenizer.vocab) + 1)
 
-    train_collator = TrainCollatorCompressedCrossEncoder(
+    train_collator = TrainCollatorCrossEncoder(
         tokenizer, 
         max_seq_length=data_args.max_seq_length, 
         format=data_args.annotation_format,
@@ -135,7 +135,7 @@ def main():
             raise ValueError("--do_eval requires a validation file.")
         validation_labels = list(set([span["label"] for sample in dataset["validation"] for span in sample["token_spans" if data_args.annotation_format == "tokens" else "char_spans"]]))
         label2id = {label: idx for idx, label in enumerate(validation_labels)}
-        eval_collator = EvalCollatorCompressedCrossEncoder(
+        eval_collator = EvalCollatorCrossEncoder(
             tokenizer, 
             label2id=label2id,
             max_seq_length=data_args.max_seq_length, 
@@ -155,7 +155,7 @@ def main():
             raise ValueError("--do_predict requires a test file.")
         test_labels = list(set([span["label"] for sample in dataset["test"] for span in sample["token_spans" if data_args.annotation_format == "tokens" else "char_spans"]]))
         label2id = {label: idx for idx, label in enumerate(test_labels)}
-        test_collator = EvalCollatorCompressedCrossEncoder(
+        test_collator = EvalCollatorCrossEncoder(
             tokenizer, 
             label2id=label2id,
             max_seq_length=data_args.max_seq_length, 
@@ -170,7 +170,6 @@ def main():
             num_workers=0
         )
 
-    # Set up optimizer with separate learning rates for different components if specified
     if training_args.linear_layers_learning_rate is not None:
         token_encoder_params = list(model.token_encoder.parameters())
         linear_layers_params = [
@@ -226,7 +225,7 @@ def main():
             if accelerator.is_main_process:
                 logger.info(f"\nLoading best model from checkpoint: {best_checkpoint_path}")
                 logger.info(f"Best validation F1: {best_f1:.4f}")
-            best_model = CompressedCrossEncoderModel.from_pretrained(str(best_checkpoint_path))
+            best_model = CrossEncoderModel.from_pretrained(str(best_checkpoint_path))
             best_model.eval()
             best_model = accelerator.prepare(best_model)
             model = best_model

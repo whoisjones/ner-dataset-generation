@@ -1,5 +1,5 @@
 import torch
-from .masks import all_spans_mask, subwords_mask
+from .masks import compressed_all_spans_mask, compressed_subwords_mask
 
 class EvalCollatorBiEncoder:
     def __init__(self, tokenizer, type_encodings, label2id, max_seq_length=512, max_span_length=30, format='text', loss_masking='none'):
@@ -44,6 +44,8 @@ class EvalCollatorBiEncoder:
             "valid_start_mask": [],
             "valid_end_mask": [],
             "valid_span_mask": [],
+            "span_subword_indices": [],
+            "span_lengths": []
         }
 
         for i in range(len(token_encodings['input_ids'])):
@@ -52,18 +54,22 @@ class EvalCollatorBiEncoder:
 
             if self.loss_masking == 'subwords':
                 word_ids = token_encodings.word_ids(i)
-                text_start_index, text_end_index, start_mask, end_mask, span_mask = subwords_mask(input_ids, word_ids, self.max_span_length)
+                text_start_index, text_end_index, start_mask, end_mask, span_mask, spans_idx, span_lengths = compressed_subwords_mask(input_ids, word_ids, self.max_span_length)
             else:
                 sequence_ids = token_encodings.sequence_ids(i)
-                text_start_index, text_end_index, start_mask, end_mask, span_mask = all_spans_mask(input_ids, sequence_ids, self.max_span_length)
+                text_start_index, text_end_index, start_mask, end_mask, span_mask, spans_idx, span_lengths = compressed_all_spans_mask(input_ids, sequence_ids, self.max_span_length)
+
+            span_lookup = {span: idx for idx, span in enumerate(spans_idx)}
 
             valid_start_mask = torch.tensor([start_mask[:] for _ in range(len(self.label2id))])
             valid_end_mask = torch.tensor([end_mask[:] for _ in range(len(self.label2id))])
-            valid_span_mask = torch.tensor([[x[:] for x in span_mask] for _ in range(len(self.label2id))])
+            valid_span_mask = torch.tensor([span_mask[:] for _ in range(len(self.label2id))])
+            span_subword_indices = torch.tensor(spans_idx)
+            span_lengths = torch.tensor(span_lengths)
 
             start_labels = torch.zeros(len(self.label2id), len(input_ids))
             end_labels = torch.zeros(len(self.label2id), len(input_ids))
-            span_labels = torch.zeros(len(self.label2id), len(input_ids), len(input_ids))
+            span_labels = torch.zeros(len(self.label2id), len(spans_idx))
 
             annotation = []
 
@@ -88,7 +94,7 @@ class EvalCollatorBiEncoder:
 
                         start_labels[self.label2id[label["label"]], start_label_index] = 1
                         end_labels[self.label2id[label["label"]], end_label_index] = 1
-                        span_labels[self.label2id[label["label"]], start_label_index, end_label_index] = 1
+                        span_labels[self.label2id[label["label"]], span_lookup[(start_label_index, end_label_index)]] = 1
 
                         annotation.append({
                             "start": start_label_index,
@@ -114,7 +120,7 @@ class EvalCollatorBiEncoder:
 
                         start_labels[self.label2id[label["label"]], start_label_index] = 1
                         end_labels[self.label2id[label["label"]], end_label_index] = 1
-                        span_labels[self.label2id[label["label"]], start_label_index, end_label_index] = 1
+                        span_labels[self.label2id[label["label"]], span_lookup[(start_label_index, end_label_index)]] = 1
 
                         annotation.append({
                             "start": start_label_index,
@@ -129,6 +135,8 @@ class EvalCollatorBiEncoder:
             annotations["valid_start_mask"].append(valid_start_mask)
             annotations["valid_end_mask"].append(valid_end_mask)
             annotations["valid_span_mask"].append(valid_span_mask)
+            annotations["span_subword_indices"].append(span_subword_indices)
+            annotations["span_lengths"].append(span_lengths)
 
         annotations["start_labels"] = torch.stack(annotations["start_labels"], dim=0)
         annotations["end_labels"] = torch.stack(annotations["end_labels"], dim=0)
@@ -136,6 +144,8 @@ class EvalCollatorBiEncoder:
         annotations["valid_start_mask"] = torch.stack(annotations["valid_start_mask"], dim=0)
         annotations["valid_end_mask"] = torch.stack(annotations["valid_end_mask"], dim=0)
         annotations["valid_span_mask"] = torch.stack(annotations["valid_span_mask"], dim=0)
+        annotations["span_subword_indices"] = torch.stack(annotations["span_subword_indices"], dim=0)
+        annotations["span_lengths"] = torch.stack(annotations["span_lengths"], dim=0)
 
         token_encoder_inputs = {
             "input_ids": token_encodings["input_ids"],
@@ -150,9 +160,6 @@ class EvalCollatorBiEncoder:
         }
         if self.type_token_type_ids is not None:
             type_encoder_inputs["token_type_ids"] = self.type_token_type_ids
-
-        if not annotations:
-            print()
 
         batch = {
             "token_encoder_inputs": token_encoder_inputs,

@@ -9,6 +9,7 @@ __pycache__/
 results/*
 ablations/*
 artifacts/*
+eval_*
 
 # Distribution / packaging
 .Python

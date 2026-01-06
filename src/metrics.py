@@ -3,41 +3,7 @@ import numpy as np
 def sigmoid(z):
     return 1/(1 + np.exp(-z))
 
-def compute_span_predictions(span_logits, start_mask, end_mask, max_span_width, id2label, threshold=0.5):
-    B, T, S, _ = span_logits.shape
-
-    span_probs = sigmoid(span_logits)
-    span_preds = np.triu(span_probs > threshold)
-    batch_ids, type_ids, start_indexes, end_indexes = np.nonzero(start_mask[..., None] & end_mask[..., None] & span_preds)
-
-    span_widths = end_indexes - start_indexes + 1
-    valid_mask = span_widths <= max_span_width
-    batch_ids = batch_ids[valid_mask]
-    type_ids = type_ids[valid_mask]
-    start_indexes = start_indexes[valid_mask]
-    end_indexes = end_indexes[valid_mask]
-
-    confidences = span_probs[batch_ids, type_ids, start_indexes, end_indexes]
-
-    order = confidences.argsort()[::-1]
-    batch_ids = batch_ids[order].tolist()
-    type_ids = type_ids[order].tolist()
-    start_indexes = start_indexes[order].tolist()
-    end_indexes = end_indexes[order].tolist()
-    confidences = confidences[order].tolist()
-
-    predictions = [[] for _ in range(B)]
-    used_by_batch = [set() for _ in range(B)]  # Use sets instead of tensors
-
-    for b, t, s, e, c in zip(batch_ids, type_ids, start_indexes, end_indexes, confidences):
-        if any(pos in used_by_batch[b] for pos in range(s, e + 1)):
-            continue
-        predictions[b].append({"start": s, "end": e, "label": id2label[t], "confidence": c})
-        used_by_batch[b].update(range(s, e + 1))
-    
-    return predictions
-
-def compute_compressed_span_predictions(span_logits, span_mask, span_mapping, id2label, threshold=0.5):
+def compute_span_predictions(span_logits, span_mask, span_mapping, id2label, threshold=0.5):
     B, C, S = span_logits.shape
 
     span_probs = sigmoid(span_logits)
@@ -118,7 +84,6 @@ def finalize_metrics(metrics_by_type, id2label=None):
     micro_r = TP / (TP + FN) if (TP + FN) else 0.0
     micro_f = (2*micro_p*micro_r / (micro_p + micro_r)) if (micro_p + micro_r) else 0.0
 
-    # Macro over classes that appeared (keys of metrics_by_type)
     if per_class:
         macro_p = sum(v["precision"] for v in per_class.values()) / len(per_class)
         macro_r = sum(v["recall"] for v in per_class.values()) / len(per_class)
